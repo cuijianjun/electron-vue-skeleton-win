@@ -1,0 +1,4 @@
+[[:space:]]./build/*.deb filter=lfs diff=lfs merge=lfs -text
+[[:space:]]./build/linux-arm64-unpacked/**.* filter=lfs diff=lfs merge=lfs -text
+build/*.deb filter=lfs diff=lfs merge=lfs -text
+build/linux-arm64-unpacked/**.* filter=lfs diff=lfs merge=lfs -text

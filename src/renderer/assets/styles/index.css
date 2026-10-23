@@ -1,0 +1,10 @@
+/* 全局基础样式 */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}

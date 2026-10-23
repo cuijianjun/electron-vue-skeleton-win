@@ -1,0 +1,24 @@
+.DS_Store
+node_modules/
+/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+build/update/
+build/**.exe
+build/**.yml
+build/**.blockmap
+build/**.yaml
+build/linux-arm64-unpacked
+build/*.deb
+*.log
+
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+.history/
