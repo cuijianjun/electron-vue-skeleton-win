@@ -63,7 +63,7 @@ npm run build:win64
 
 目标 Windows 上需要实际执行安装、协议唤起、升级与卸载验收。macOS 上的公共代码测试不算 Windows 验收。
 
-所有构建固定 --publish never。release/ 包含安装包及必要的更新元数据，正式发布、生产源和签名配置由后续发布流程处理。
+所有构建固定 `--publish never`，只生成文件，不自动上传 GitHub 或更新服务。实际发布使用本文后面的统一服务 CLI。
 
 ## 环境与 IPC
 
@@ -86,21 +86,16 @@ const value = await desktop.settings.get('enabled')
 
 每个 scope 只拥有自己的订阅；清理不会影响其他组件。旧 `$ipcRenderer.invoke/send/sendSync/on` 仅作兼容；`sendSync` 现在只读初始化后的内存，无原生同步 IPC，启动前调用会明确报错。旧 send 返回 Promise，应 await 写入确认并处理失败。生产构建忽略开发服务器 URL。
 
-## 两种更新
+## 两种更新的选择
 
-- 全量更新：Electron、main、preload、依赖或安装包变更。通过 APP_UPDATE_URL 配置 generic 元数据目录；未配置时不连接默认生产服务器。Windows 使用 NSIS；UOS 使用所选 updater 的 DEB/包管理器路径，授权及失败恢复仍须实机验收。
-- 界面资源更新：只包含 renderer 文件。schemaVersion=1/2、Ed25519 签名、SHA256、平台/架构及完整运行时指纹必须匹配。相同/更旧版本不重复安装。暂存后需要主窗口 Vue 启动确认；失败在 12 秒后或下次启动回退。
-- get-version 表示应用版本；get-resource-version 表示当前界面版本；get-install-version 同时提供 rendererVersion。
-- 私钥保存在项目和客户端之外。客户端配置 RESOURCE_UPDATE_PUBLIC_KEY_FILE 与 RESOURCE_UPDATE_URL；默认没有信任配置时禁用资源更新。旧的全量资源 ZIP/清单会被拒绝，需要先发全量安装包。
+| 改动 | 发布方式 | 版本规则 |
+|---|---|---|
+| Electron、main、preload、依赖/锁文件或安装配置 | 全量安装包（Windows NSIS / UOS DEB） | 增加 package.json 的应用版本，并同步锁文件 |
+| 只修改 renderer，运行时指纹保持不变 | Ed25519 签名的 renderer 差异 ZIP + 完整快照 | 仅增加资源版本，保持应用版本和依赖锁不变 |
 
-先 build:app，再用外部 Ed25519 发布私钥生成资源包：
+Windows 全量安装包下载也可使用 NSIS blockmap 差分；它与 renderer 增量是两条独立链路。UOS 全量下载 DEB，renderer 增量支持 x64/ARM64。界面更新不包含主进程或 Electron，不能代替全量升级。
 
-```sh
-npm run pack:resources -- --platform win32 --arch x64 --version 1.0.1 --signing-key /secure/publisher-private.pem
-npm run update:serve -- --dir release/resources/win32-x64 --port 25565
-```
-
-signing-key 是发布机上的实际路径。开发辅助服务只监听 127.0.0.1。客户端清单地址例如 http://127.0.0.1:25565/manifest.json；远程更新源使用 HTTPS。资源包目标必须与客户端一致，构建身份过期时打包命令会要求重新 build:app。
+具体命令见下文“打包、发布与更新操作手册”；两种通道互斥，已下载就绪时先安装或取消，再操作另一通道。
 
 ## 增量验证
 
@@ -111,7 +106,7 @@ npm run test:e2e
 npm run test:dev
 ```
 
-test:e2e 使用隔离 userData 和本地签名/HTTP 夹具，覆盖路由、真实桥接、子窗口、iframe、文件、下载、存储和资源重启/回退。test:dev 临时修改并还原一处模板，检查 HMR 不重载 renderer；运行后打包前重新 build:app。
+上面的 `test:e2e` 夹具固定以应用1.0.0及资源1.0.1/1.0.2/1.0.3验证，须在当前应用仍为1.0.0时运行；`test:packaged` 也断言应用1.0.0，不能作为任意新版本的直接验收命令。变更应用版本后，运行单元测试及服务端动态版本的 `test:clients`，并完成实际新旧安装包的目标平台验收；不为迎合夹具降回应用版本。test:e2e 使用隔离 userData 和本地签名/HTTP 夹具，覆盖路由、真实桥接、子窗口、iframe、文件、下载、存储和资源重启/回退。test:dev 临时修改并还原一处模板，检查 HMR 不重载 renderer；运行后打包前重新 build:app。
 
 test:packaged 通过 SKELETON_PACKAGED_EXECUTABLE 指向实际打出的应用，检查没有源码 lockfile 也可启动及运行时身份。测试不会调用真实生产更新源。
 
@@ -159,42 +154,152 @@ Windows默认使用上游支持的 `ELECTRON_BUILDER_COMPRESSION_LEVEL=3`，紧�
 
 本轮任务、实测和验收范围见 [specs/002-ipc-packaging/research.md](specs/002-ipc-packaging/research.md)。
 
-## 全量与增量更新配置
+## 打包、发布与更新操作手册
 
-源码 `config/updates.json` 会复制为安装目录的 `resources/updates.json`，主进程读取这份公开配置；安装后可直接修改，修改后重启应用生效，无需从终端设置环境变量。配置项：
+### 1. 准备发布环境
 
-| 字段 | 用途 |
-|---|---|
-| fullURL | 完整安装包更新目录，提供平台对应的 latest*.yml 和安装包 |
-| resourceURL | 增量 renderer 的 manifest.json 地址 |
-| publicKey | Ed25519 发布公钥 PEM 文本；私钥始终保存在客户端/仓库之外 |
-| autoCheck | 进入更新页面时是否自动检查，只有已配置更新源才启动 |
-| intervalHours | 更新页面保持打开期间的检查间隔，1至168小时，默认12 |
-
-`APP_UPDATE_URL`、`RESOURCE_UPDATE_URL`、`RESOURCE_UPDATE_PUBLIC_KEY` 和 `RESOURCE_UPDATE_PUBLIC_KEY_FILE` 可显式覆盖。远程源使用HTTPS，本地夹具仅允许loopback HTTP；空源默认禁用。界面从主进程读取状态，重新打开页面仍能安装已下载包。两个通道互斥，就绪后也须先安装或取消才能使用另一通道。
-
-全量发布流程：更新 package.json/锁文件中的应用版本，使用原平台构建命令生成新包。将 Windows EXE与blockmap，或对应架构DEB上传，再最后更新生成的latest.yml / latest-linux.yml / latest-linux-arm64.yml。每个平台/架构分别使用正确的源目录。Windows安装器走NSIS；Linux由DebUpdater选择DEB并调用包管理器/提权。失败或拒绝授权会回到可重试状态，不伪报安装完成。
-
-增量发布时保留上一版完整renderer目录，修改界面后重新 `npm run build:app`，再运行：
+本文 `sh` 命令用于当前 macOS/Linux 发布机，默认两个客户端与服务端同级；Windows 本机也可运行 npm 打包命令，变量和路径按 PowerShell 改写。构建固定 Node24.22.0 / npm11.19.1：
 
 ```sh
-npm run pack:resources -- --platform win32 --arch x64 --version 1.0.1 --signing-key /secure/publisher-private.pem --base-dir /archive/1.0.0/renderer --base-version 1.0.0
+cd /path/to/yz/electron-vue-skeleton-win
+nvm install
+nvm use
+node --version
+npm --version
+npm ci
 ```
 
-platform取win32或linux，arch取x64或arm64，与目标客户端一致。客户端应用版本、main、preload、依赖锁与Electron必须保持兼容；运行时变化走全量更新。`--base-dir` 必须是先前真实发布的renderer目录，`--base-version` 是其renderer版本；不能用修改后的目录冒充基线。
+全量安装器仍需目标系统验收。首次在同级服务端执行 `npm ci`；本机已有配置、密钥和常驻服务可直接复用，不重复初始化。新环境先按[服务端 README](https://github.com/cuijianjun/electron-update-server/blob/agent/update-server-main/README.md)恢复已有密钥，再初始化。当前本机服务入口为 `http://127.0.0.1:25565/healthz`。
 
-带base参数产生schema2：差异ZIP只含新增/修改文件，完整目标清单表达删除；先验证实际基线，再合成独立目录并校验全部目标文件。基线不匹配时只下载同一签名清单约束的完整renderer快照。未传base参数仍生成schema1完整renderer包，兼容既有客户端。旧客户端应先全量升级到支持schema2的应用，再切换差异清单。两个归档都采用内容寻址文件名，先上传ZIP，最后切换manifest.json，保留仍被客户端引用的历史归档。
+发布前在专用 Bash/zsh 会话设置以下变量，在本项目根目录按顺序执行后续步骤；`set -e` 使失败时停止当前会话，避免检查失败仍继续发布。新开终端需重新设置：
 
-检查→下载→校验暂存→确认重启→新进程Vue启动确认构成完整资源链路；首次启动失败或待更新文件损坏回退上个正常版本。下载支持取消，取消后的迟到响应不能激活；已就绪可稍后安装，重复检查不会丢失全量安装器。私钥不进入安装包。
+```sh
+set -e
+PROJECT=electron-vue-skeleton-win
+PLATFORM=win32
+ARCH=x64
+SERVER="$(cd ../electron-update-server && pwd)"
+SERVER_CONFIG="$HOME/.config/electron-update-server/config.json"
+SIGNING_KEY="$HOME/.config/electron-update-server/keys/$PROJECT-private.pem"
+BASE_ROOT="$HOME/.local/share/electron-update-server/baselines/$PROJECT/$PLATFORM-$ARCH"
+test -r "$SERVER_CONFIG" && test -r "$SIGNING_KEY"
+```
 
-本轮实现与验证范围见 [specs/003-update-channels](specs/003-update-channels/tasks.md)。UOS具体机器的安装、提权、升级体验仍以原001真机验收为准；本地HTTP夹具通过不表示生产更新源已经部署。
+此仓库仅发布 Windows x64；不把 arm64/ia32 当作已支持的 Windows 目标。
 
-## 本机统一更新服务已接入
+### 2. 上线前设置更新地址
 
-同级 `electron-update-server` 项目负责两个客户端的全量与增量发布，默认健康入口为 http://127.0.0.1:25565/healthz。当前config/updates.json已写入本项目独立的签名公钥和本机地址；`{arch}`与`{runtimeId}`由主进程按实际运行环境替换。私钥在仓库之外的 `~/.config/electron-update-server/keys/`，需要长期备份；这里提交的是公钥。
+`config/updates.json` 被复制为安装目录的 `resources/updates.json`。当前提交的是本机测试地址和本项目独立公钥。正式上线只修改地址，保留公钥：
 
-服务通过用户级LaunchAgent运行，包/日志/renderer基线保存在 `~/.local/share/electron-update-server/`。当前预装1.0.0基线，同版本显示无更新；实际更新发布需增加应用或renderer版本。完整发布命令和密钥迁移规则见服务端README。
+```sh
+UPDATE_ORIGIN=https://updates.example.com node - <<'NODE'
+const fs = require('node:fs')
+const file = 'config/updates.json'
+const config = JSON.parse(fs.readFileSync(file, 'utf8'))
+const origin = new URL(process.env.UPDATE_ORIGIN)
+if (origin.protocol !== 'https:' || origin.pathname !== '/' || origin.search || origin.hash || origin.username || origin.password) throw new Error('Use an HTTPS origin without a path or credentials')
+const prefix = origin.origin + '/v1/electron-vue-skeleton-win/win32/{arch}/latest/'
+config.fullURL = prefix + 'full/'
+config.resourceURL = prefix + 'resources/{runtimeId}/manifest.json'
+fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n')
+NODE
+```
 
-`npm run update:serve -- --config /path/config.json` 可调用同级统一服务；原 `--dir` 单目录夹具保持兼容。常驻服务已经运行时直接使用，不重复抢占端口。测试会显式隔离本机默认源，不会把测试版本发布到日常服务。
+`updates.example.com` 是占位域名，等实际服务器地址和可信 TLS 证书就绪后替换。域名或 IP 的远程源都必须使用 HTTPS；资源请求不跟随重定向，填写最终 URL。`{arch}` / `{runtimeId}` 保留原样，由主进程展开。修改后重新构建安装包；`package.json.build.publish.url` 仅供 builder 生成元数据，实际检查源来自 `updates.json`，发布器会重写包的相对路径。
 
-127.0.0.1配置适用于服务与客户端同机；其他机器需自己的服务或可信HTTPS地址，不能用它访问当前Mac。本批没有新增UOS真机验收。
+| 配置字段 | 含义 |
+|---|---|
+| fullURL | 平台/架构对应的全量元数据目录，结尾保留 `/` |
+| resourceURL | 当前 runtimeId 的 manifest.json 完整模板 |
+| publicKey | 当前项目 Ed25519 公钥 PEM；保留初始化所得内容 |
+| autoCheck | 进入更新页面时自动检查；当前 true |
+| intervalHours | 更新页面打开期间检查间隔，1–168 小时；当前 12 |
+
+环境变量 `APP_UPDATE_URL`、`RESOURCE_UPDATE_URL`、`RESOURCE_UPDATE_PUBLIC_KEY` 覆盖文件；`RESOURCE_UPDATE_PUBLIC_KEY_FILE` 优先读取外部公钥文件。排查时先确认启动环境没有旧覆盖。空地址禁用相应通道。
+
+已安装且仍指向 `127.0.0.1` 的测试客户端不会自动发现新服务器：首次切换需安装包含正式地址的新全量包，或在有权限时修改其 `resources/updates.json` 并重启。另一台机器上的 127.0.0.1 指向它自己。
+
+### 3. 打全量包，并保存同版本 renderer 基线
+
+以下以应用 `1.0.0 → 1.0.1` 为例；实际选择高于已发布应用版本的新版本。首次升级前，先在当前1.0.0源码执行上文固定版本E2E；通过后再更改版本。版本增加后的发布验收采用单元测试、服务端动态版本联调和目标机安装验证。只发 renderer 增量时跳到步骤 5，不执行 npm version。
+
+```sh
+npm version 1.0.1 --no-git-tag-version --ignore-scripts
+npm run test:unit
+npm run build:app
+APP_VERSION=$(node -p "require('./package.json').version")
+FULL_DIR="release/full/$PLATFORM-$ARCH/$APP_VERSION"
+npm run build:win64 -- --output "$FULL_DIR"
+```
+
+输出为 NSIS 安装器。Windows 本机运行相同 npm 命令；跨打包后的安装、升级和卸载仍须在 Windows 验收。
+
+仅上传 Windows x64 的 EXE、EXE.blockmap、latest.yml；不上传 unpacked 应用目录、debug 配置或私钥。Windows 保留新旧版本的 blockmap 才能进行安装包差分下载。常规快速档保持 ASAR 和差分能力；更小安装包可用 `npm run build:compact -- --platform "$PLATFORM" --arch "$ARCH" --output "$FULL_DIR"`，在首次发布前选择一个档位，已经发布的同版本不能用另一档覆盖。
+
+为这个完整应用登记 renderer 初始版本（同版本客户端不会提示更新），同时保存下一次差异计算所需的完整目录：
+
+```sh
+RESOURCE_DIR="release/resources/$PLATFORM-$ARCH/$APP_VERSION"
+npm run pack:resources -- --platform "$PLATFORM" --arch "$ARCH" --version "$APP_VERSION" --signing-key "$SIGNING_KEY" --out "$RESOURCE_DIR"
+RUNTIME_ID=$(node -p "require('./$RESOURCE_DIR/manifest.json').runtimeId")
+BASE_DIR="$BASE_ROOT/$RUNTIME_ID/$APP_VERSION/renderer"
+test ! -e "$BASE_DIR" && mkdir -p "$(dirname "$BASE_DIR")" && cp -R dist/electron/renderer "$BASE_DIR"
+cp "$RESOURCE_DIR/manifest.json" "$(dirname "$BASE_DIR")/manifest.json"
+```
+
+复制必须成功；存在同名基线时先核对，不能覆盖。保存的是此次实际打包的完整 renderer，不是差异 ZIP 解压目录。本文新基线按平台/架构隔离，避免UOS两架构runtimeId相同导致目录冲突。当前本机已有1.0.0的旧布局基线仍在 `$HOME/.local/share/electron-update-server/baselines/$PROJECT/<runtimeId>/1.0.0/renderer`；若从1.0.0发增量，核对内容确属该目标后，可将 `BASE_DIR` 显式设为该旧目录，或复制到本文新布局，保留原目录不移动。对应manifest可从服务端该目标的 `resources/<runtimeId>/versions/1.0.0/manifest.json` 恢复。`runtimeId` 包含应用版本、main/preload 字节、Electron、依赖与锁文件摘要，不同运行时不能混用。
+
+### 4. 发布全量包和初始资源清单
+
+同级两客户端都须有新鲜production构建，发布前从服务端运行动态版本联调。本机发布器验证所有包后，最后原子切换当前指针；不手工编辑 latest*.yml 或签名 manifest：
+
+```sh
+(cd "$SERVER" && npm run test:clients)
+node "$SERVER/src/cli.cjs" publish-full --config "$SERVER_CONFIG" --project "$PROJECT" --platform "$PLATFORM" --arch "$ARCH" --dir "$FULL_DIR"
+node "$SERVER/src/cli.cjs" publish-resources --config "$SERVER_CONFIG" --project "$PROJECT" --platform "$PLATFORM" --arch "$ARCH" --dir "$RESOURCE_DIR"
+```
+
+两条发布命令各自原子化，跨通道并非一个事务。正式服务器上须先把发布文件复制到该服务器的 incoming 目录，再以服务器的 `--config` / `--dir` 执行 CLI；本机命令不会自动上传。完整上传与部署步骤见[服务端 README](https://github.com/cuijianjun/electron-update-server/blob/agent/update-server-main/README.md)。HTTP 接口只读。
+
+随后从旧应用检查 → 下载 → 确认安装 → 重启，核对应用版本、数据保留、协议及授权取消。Windows 走 NSIS；UOS 走 DebUpdater 和包管理器提权。全量版本与已安装相同则显示无更新。
+
+### 5. 发布 renderer 增量
+
+示例假定应用仍为 `1.0.1`、该 runtimeId 的已发布 renderer 基线为 `1.0.1`，要发资源 `1.0.2`。不要修改应用版本、main、preload、依赖或锁文件；只修改 renderer 后执行：
+
+```sh
+BASE_VERSION=1.0.1
+RESOURCE_VERSION=1.0.2
+# 使用步骤3登记的真实manifest；release已清理时改为归档的绝对路径。
+BASE_MANIFEST="release/resources/$PLATFORM-$ARCH/$BASE_VERSION/manifest.json"
+RUNTIME_ID=$(node -p "JSON.parse(require('node:fs').readFileSync(process.argv[1], 'utf8')).runtimeId" "$BASE_MANIFEST")
+BASE_DIR="$BASE_ROOT/$RUNTIME_ID/$BASE_VERSION/renderer"
+test -f "$BASE_DIR/index.html"
+npm run test:unit
+npm run build:app
+RESOURCE_DIR="release/resources/$PLATFORM-$ARCH/$RESOURCE_VERSION"
+npm run pack:resources -- --platform "$PLATFORM" --arch "$ARCH" --version "$RESOURCE_VERSION" --signing-key "$SIGNING_KEY" --base-dir "$BASE_DIR" --base-version "$BASE_VERSION" --out "$RESOURCE_DIR"
+# 不同则停止，重新按全量发布流程处理。
+test "$RUNTIME_ID" = "$(node -p "require('./$RESOURCE_DIR/manifest.json').runtimeId")"
+(cd "$SERVER" && npm run test:clients)
+NEXT_BASE="$BASE_ROOT/$RUNTIME_ID/$RESOURCE_VERSION/renderer"
+test ! -e "$NEXT_BASE" && mkdir -p "$(dirname "$NEXT_BASE")" && cp -R dist/electron/renderer "$NEXT_BASE"
+cp "$RESOURCE_DIR/manifest.json" "$(dirname "$NEXT_BASE")/manifest.json"
+node "$SERVER/src/cli.cjs" publish-resources --config "$SERVER_CONFIG" --project "$PROJECT" --platform "$PLATFORM" --arch "$ARCH" --dir "$RESOURCE_DIR"
+```
+
+上面 `test:clients` 完成动态版本的packer→HTTP→实际客户端控制器回归；同级两个客户端都需要新鲜production构建。每条检查失败都应停止，不继续执行发布。下次把 BASE_VERSION 改为刚发布的资源版本，并选择更高 RESOURCE_VERSION。基线与manifest按 `$BASE_ROOT/<runtimeId>/<资源版本>/` 配对保留，先备份再清理构建输出；新发布机还需恢复这两项和原签名私钥。只换 URL 不需要重新生成密钥。
+
+有 base 参数输出 schema2：差异 ZIP + 完整目标文件清单 + 签名约束的完整快照，文件删除由目标清单表达。客户端只有版本与实际基线哈希均匹配时才下载差异；跳版本或基线不同会下载同一 manifest 的完整快照。未传 base 参数输出 schema1 完整 renderer ZIP。旧协议客户端先发全量升级。单个 ZIP 上限 50MiB，展开后总量上限 100MiB / 5000文件。
+
+资源更新流程：检查 → 下载/取消 → 签名及哈希校验 → 暂存 → 确认重启 → Vue 启动确认。首次启动失败会在12秒超时或下次启动回退上一正常 renderer；资源存于 userData，不修改 app.asar。`get-version` 是应用版本，`get-resource-version` 是资源版本。
+
+### 6. 发布验收、恢复与保留
+
+- 先安装旧版，再测新版全量更新；同一应用 runtimeId 下测试资源差异、跳版本快照、取消下载和重启生效。目标 Windows/UOS 需各自真机或 VM 验收。
+- 服务器 latest*.yml / manifest.json 返回 `Cache-Control: no-store`；版本化安装包和 ZIP 允许长期缓存。健康检查成功还需验证实际元数据、归档和 Range，命令见服务端 README。
+- 同版本不同内容、旧版本提升、签名不符和并发发布会拒绝。已发布版本保持不可变；服务端回滚采用发布更高版本的修复包，不能手改签名清单或用低版本覆盖。renderer 启动自动回退不等于全量安装器自动回滚。
+- 长期备份每项目私钥、公钥、公开配置、服务端数据、历史 blockmap、完整 renderer 基线和发布 manifest。Ed25519 仅签资源清单；Windows Authenticode 证书需另外配置，不能拿资源私钥代替。
+- `release/` / `dist/electron/` 可在发布产物与基线备份后重建。不要删除仍被旧客户端引用的归档、基线或生产数据；常驻测试服务与生产环境分别保留数据。
+
+当前本机服务已发布 Windows x64、UOS x64/ARM64 的 1.0.0 全量包及资源基线。本地自动化证据见 [003更新任务](specs/003-update-channels/tasks.md) 与[服务端验收](https://github.com/cuijianjun/electron-update-server/blob/agent/update-server-main/specs/001-local-update-service/tasks.md)。本机联调通过不表示公网已经上线；UOS 版本、CPU、glibc、桌面会话与安装提权验收仍待目标环境。
