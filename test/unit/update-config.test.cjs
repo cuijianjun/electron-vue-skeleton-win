@@ -20,3 +20,13 @@ test('malformed configuration disables update sources without preventing applica
   }
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 })
+test('update endpoint templates resolve only supported runtime and architecture values',()=>{
+ const {expandUpdateURL}=require('../../src/main/services/updateConfig.cjs')
+ assert.equal(typeof expandUpdateURL,'function')
+ const value=expandUpdateURL('http://127.0.0.1/v1/uos/{platform}/{arch}/resources/{runtimeId}/manifest.json',{platform:'linux',arch:'arm64',runtimeId:'a'.repeat(64)})
+ assert.ok(value.includes('/linux/arm64/resources/'+'a'.repeat(64)+'/'))
+ assert.throws(()=>expandUpdateURL('https://updates.example/{arch}',{arch:'../escape'}))
+ assert.throws(()=>expandUpdateURL('https://updates.example/{runtimeId}',{}))
+ assert.throws(()=>expandUpdateURL('https://updates.example/{secret}',{}))
+ assert.equal(expandUpdateURL('',{}),'')
+})

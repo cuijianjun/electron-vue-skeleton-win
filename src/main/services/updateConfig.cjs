@@ -14,4 +14,14 @@ function readUpdateConfig(file,env=process.env){
  return {fullURL:pick('APP_UPDATE_URL',config.fullURL||''),resourceURL:pick('RESOURCE_UPDATE_URL',config.resourceURL||''),publicKey,autoCheck:config.autoCheck===true,intervalHours:Number.isFinite(config.intervalHours)&&config.intervalHours>=1&&config.intervalHours<=168?config.intervalHours:12,error,resourceError}
 }
 function updateConfig(app){return readUpdateConfig(app.isPackaged?path.join(process.resourcesPath,'updates.json'):path.join(app.getAppPath(),'config/updates.json'))}
-module.exports={readUpdateConfig,updateConfig}
+function expandUpdateURL(value,context){
+ if(typeof value!=='string')throw new Error('Invalid update URL template')
+ const result=value.replace(/\{(platform|arch|runtimeId)\}/g,(_match,key)=>{
+  const v=context[key]
+  if(key==='runtimeId'?!/^[a-f0-9]{64}$/.test(v):!(key==='arch'?['x64','arm64']:['win32','linux','darwin']).includes(v))throw new Error('Unavailable update template value: '+key)
+  return v
+ })
+ if(/[{}]/.test(result))throw new Error('Unsupported update URL placeholder')
+ return result
+}
+module.exports={readUpdateConfig,updateConfig,expandUpdateURL}

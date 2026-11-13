@@ -5,6 +5,7 @@ test('update route shows full/resource choices and routes confirmation to the ma
  const userData=await fs.mkdtemp(path.join(os.tmpdir(),'update-dialog-'))
  const env={...process.env,SKELETON_E2E:'1',SKELETON_USER_DATA:userData}
  for(const name of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','APP_UPDATE_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[name]
+ for(const key of ['APP_UPDATE_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY'])env[key]=''
  const app=await _electron.launch({executablePath:require('electron'),args:[path.resolve(__dirname,'../..')],env,timeout:15000})
  try{
   const page=await app.firstWindow();await page.waitForSelector('.home')

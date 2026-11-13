@@ -21,6 +21,7 @@ test('ASAR packaged application starts and retains compiled bytes and runtime de
  const userData=await fsp.mkdtemp(path.join(os.tmpdir(),'packaged-electron-'))
  const env={...process.env,SKELETON_E2E:'1',SKELETON_USER_DATA:userData,ELECTRON_RENDERER_URL:'http://127.0.0.1:1/untrusted'}
  for(const name of ['ELECTRON_RUN_AS_NODE','APP_UPDATE_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[name]
+ for(const key of ['APP_UPDATE_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY'])env[key]=''
  const app=await _electron.launch({executablePath:executable,args:[],env,timeout:15000})
  try{
   const page=await app.firstWindow();await page.waitForSelector('.home',{timeout:20000})

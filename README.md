@@ -188,3 +188,13 @@ platform取win32或linux，arch取x64或arm64，与目标客户端一致。客�
 检查→下载→校验暂存→确认重启→新进程Vue启动确认构成完整资源链路；首次启动失败或待更新文件损坏回退上个正常版本。下载支持取消，取消后的迟到响应不能激活；已就绪可稍后安装，重复检查不会丢失全量安装器。私钥不进入安装包。
 
 本轮实现与验证范围见 [specs/003-update-channels](specs/003-update-channels/tasks.md)。UOS具体机器的安装、提权、升级体验仍以原001真机验收为准；本地HTTP夹具通过不表示生产更新源已经部署。
+
+## 本机统一更新服务已接入
+
+同级 `electron-update-server` 项目负责两个客户端的全量与增量发布，默认健康入口为 http://127.0.0.1:25565/healthz。当前config/updates.json已写入本项目独立的签名公钥和本机地址；`{arch}`与`{runtimeId}`由主进程按实际运行环境替换。私钥在仓库之外的 `~/.config/electron-update-server/keys/`，需要长期备份；这里提交的是公钥。
+
+服务通过用户级LaunchAgent运行，包/日志/renderer基线保存在 `~/.local/share/electron-update-server/`。当前预装1.0.0基线，同版本显示无更新；实际更新发布需增加应用或renderer版本。完整发布命令和密钥迁移规则见服务端README。
+
+`npm run update:serve -- --config /path/config.json` 可调用同级统一服务；原 `--dir` 单目录夹具保持兼容。常驻服务已经运行时直接使用，不重复抢占端口。测试会显式隔离本机默认源，不会把测试版本发布到日常服务。
+
+127.0.0.1配置适用于服务与客户端同机；其他机器需自己的服务或可信HTTPS地址，不能用它访问当前Mac。本批没有新增UOS真机验收。

@@ -10,6 +10,7 @@ test('npm dev starts Electron and Vue template HMR keeps the renderer alive',{ti
  const pkg=require('../../node_modules/electron-vite/package.json')
  const bin=typeof pkg.bin==='string'?pkg.bin:pkg.bin['electron-vite']
  const env={...process.env,SKELETON_E2E:'1',SKELETON_DEV_DEBUG:'1',SKELETON_USER_DATA:userData};for(const name of ['ELECTRON_RUN_AS_NODE','APP_UPDATE_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[name]
+ for(const key of ['APP_UPDATE_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY'])env[key]=''
  const child=spawn(process.execPath,[path.join(root,'node_modules/electron-vite',bin),'dev'],{cwd:root,env,detached:process.platform!=='win32',stdio:['ignore','pipe','pipe']})
  let browser,output=''
  const endpoint=new Promise((resolve,reject)=>{

@@ -9,6 +9,7 @@ test('production Electron: Vue routes, narrow IPC, persistence and isolated wind
   const userData=await fs.mkdtemp(path.join(os.tmpdir(),'vue3-electron-'))
   const env={...process.env,NODE_ENV:'production',NODE_OPTIONS:'',SKELETON_E2E:'1',SKELETON_USER_DATA:userData,ELECTRON_RENDERER_URL:'http://127.0.0.1:1/untrusted'}
   for(const name of ['ELECTRON_RUN_AS_NODE','APP_UPDATE_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[name]
+ for(const key of ['APP_UPDATE_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY'])env[key]=''
   const app=await _electron.launch({executablePath:require('electron'),args:[path.resolve(__dirname,'../..')],env,timeout:20000})
   let fixtureServer
   try{

@@ -1,7 +1,7 @@
 {
-  "fullURL": "",
-  "resourceURL": "",
-  "publicKey": "",
+  "fullURL": "http://127.0.0.1:25565/v1/electron-vue-skeleton-win/win32/{arch}/latest/full/",
+  "resourceURL": "http://127.0.0.1:25565/v1/electron-vue-skeleton-win/win32/{arch}/latest/resources/{runtimeId}/manifest.json",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAkcz1H3JpqjaJgakfDtn9K6JDc8OwKCzN6McyQ1atEr4=\n-----END PUBLIC KEY-----\n",
   "autoCheck": true,
   "intervalHours": 12
 }

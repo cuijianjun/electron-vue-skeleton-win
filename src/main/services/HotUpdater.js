@@ -5,7 +5,7 @@ import { resourceContext } from './resourceContext'
 import settings from './updateConfig.cjs'
 let controller
 function feedURL(){
- const raw=settings.updateConfig(app).resourceURL
+ const raw=settings.expandUpdateURL(settings.updateConfig(app).resourceURL,{platform:process.platform,arch:process.arch,runtimeId:resourceContext().runtimeId})
  if(!raw)throw new Error('Resource update source is not configured')
  const url=new URL(raw)
  if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname)))throw new Error('Resource update source must use HTTPS')
