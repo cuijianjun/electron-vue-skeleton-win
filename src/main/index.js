@@ -1,4 +1,5 @@
 import './bootstrap'
+import { secureIpcMain as desktopIpc } from './services/secureIpc'
 'use strict'
 
 /**
@@ -84,11 +85,11 @@ function handleDeepLink (url) {
         if (mainWindow.webContents.isLoading()) {
           mainWindow.webContents.once('did-finish-load', () => {
             logger.info('渲染进程加载完成，发送深度链接参数:', params)
-            mainWindow.webContents.send('deep-link-params', params)
+            desktopIpc.send(mainWindow.webContents,'deep-link-params', params)
           })
         } else {
           logger.info('立即发送深度链接参数到渲染进程:', params)
-          mainWindow.webContents.send('deep-link-params', params)
+          desktopIpc.send(mainWindow.webContents,'deep-link-params', params)
         }
 
         // Windows 下额外处理：让窗口短暂置顶，确保弹到最前面
@@ -132,11 +133,11 @@ async function onAppReady () {
       if (mainWindow) {
         const sendParams = () => {
           logger.info('发送深度链接参数到渲染进程:', deepLinkParams)
-          mainWindow.webContents.send('deep-link-params', deepLinkParams)
+          desktopIpc.send(mainWindow.webContents,'deep-link-params', deepLinkParams)
 
           // 二次发送 + 清空，确保消息被可靠接收
           setTimeout(() => {
-            mainWindow.webContents.send('deep-link-params', deepLinkParams)
+            desktopIpc.send(mainWindow.webContents,'deep-link-params', deepLinkParams)
             deepLinkParams = null
           }, 1000)
         }

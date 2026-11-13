@@ -43,11 +43,11 @@ export default {
       const frame = document.querySelector('iframe')
       if (!this.src || event.source !== frame?.contentWindow || event.origin !== new URL(this.src).origin || !event.data || typeof event.data !== 'object') return
       // 把子页面消息通过兄弟窗口传值通道转发给主窗口
-      this.$ipcRenderer.send('siblingConnect', event.data?.type || event.data)
+      this.$desktop.window.messageSiblings(event.data?.type || event.data)
 
       // 收到 finishTask 消息时关闭当前子窗口
       if (event.data?.type === 'finishTask') {
-        this.$ipcRenderer.invoke('window-close')
+        this.$desktop.window.close()
       }
     },
     // 子页面关闭时的处理（兄弟窗口刷新）
@@ -57,7 +57,7 @@ export default {
         message: '子页面关闭',
         isSaveOffice: false
       }
-      this.$ipcRenderer.send('sendRefresh', data)
+      this.$desktop.window.refreshSiblings(data)
     }
   }
 }

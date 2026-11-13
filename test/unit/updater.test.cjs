@@ -8,7 +8,7 @@ function fixture(){
  updater.quitAndInstall=()=>{installs++}
  const messages=[]
  const controller=new UpdateController(updater,()=>({cancelled:false,cancel(){this.cancelled=true}}))
- return {controller,updater,messages,window:{isDestroyed:()=>false,webContents:{send:(_channel,m)=>messages.push(m)}},get checks(){return checks},get installs(){return installs},get token(){return token}}
+ return {controller,updater,messages,window:{isDestroyed:()=>false,webContents:{send:(channel,envelope)=>{assert.equal(channel,'desktop:event');assert.equal(envelope.operation,'update-msg');messages.push(envelope.args[0])}}},get checks(){return checks},get installs(){return installs},get token(){return token}}
 }
 test('unconfigured and insecure update sources do not invoke a provider',async()=>{
  const f=fixture();assert.equal((await f.controller.check(f.window,'')).ok,false)

@@ -71,7 +71,20 @@ env/.env、env/test.env、env/production.env 分别映射 development/test/produ
 
 主进程校验调用者必须是当前应用顶层页面；子窗口使用同样的隔离设置。iframe 消息同时检查 source 和 origin。文件分片只能读取该窗口选择过的文件；下载目录限制为 Downloads 或用户选择的目录，并检查真实路径/链接。
 
-renderer 的桥接适配保留现有 invoke/send/sendSync/on 调用形态，实际经有限 preload 函数转发。订阅支持清理，重复注册同一回调不叠加。生产构建忽略开发服务器 URL。
+`src/shared/ipc.mjs` 是统一通信入口：集中操作白名单、参数约束、原生 `desktop:request` / `desktop:event` 和三进程适配工厂。main/preload 的其他文件不直接收发原生消息。请求使用 invoke/handle；事件发给所属窗口，广播配置时仍验证目标页面。
+
+Vue 挂载前 `await desktop.ready()` 异步加载版本、系统摘要和配置快照。业务页面使用 `$desktop.window/settings/update/resources/files`，不再发送底层通道。配置变更带单调版本和本窗口写确认，跨窗口缓存同步；旧快照与逆序确认不会覆盖新值。深链与子窗口的早到数据最多排队32条，首次订阅消费，保留原生结构化克隆类型。
+
+```js
+import { desktop } from './utils/ipc/bridge'
+const scope = desktop.scope()
+const stop = scope.events.on('download-progress', percent => console.log(percent))
+await desktop.settings.set('enabled', false)
+const value = await desktop.settings.get('enabled')
+// 组件卸载时 scope.dispose()；也可单独 stop()。
+```
+
+每个 scope 只拥有自己的订阅；清理不会影响其他组件。旧 `$ipcRenderer.invoke/send/sendSync/on` 仅作兼容；`sendSync` 现在只读初始化后的内存，无原生同步 IPC，启动前调用会明确报错。旧 send 返回 Promise，应 await 写入确认并处理失败。生产构建忽略开发服务器 URL。
 
 ## 两种更新
 
@@ -125,3 +138,23 @@ UOS 环境采集可使用 cat /etc/os-release、uname -m、getconf GNU_LIBC_VERS
 ## 文件保留
 
 源码、锁文件、.specify、.agents、specs 和续接状态应保留。node_modules、dist/electron、release 是可重建内容。build:clean 只清理 dist/electron，保留原 build/ 中的安装脚本与其他历史文件。
+
+## 更快的打包与更小的安装内容
+
+```sh
+npm run build:app              # 始终编译生产 main / preload / renderer
+npm run build:dir              # 自动校验并复用编译产物，生成可运行目录
+npm run pack:dir               # 仅打目录；缺失/过期/被修改的产物直接拒绝
+npm run pack:release           # 仅生成安装包；同样强制校验
+npm run build:compact          # 紧凑档：Windows级别9 / UOS XZ级别3，耗时更长
+```
+
+可追加 `-- --platform win32|linux --arch x64|arm64`；UOS 的 arm64 示例是 `npm run pack:release -- --arch arm64`。现有平台 build 命令会自动编译缺失/过期产物；`--rebuild` 强制重建。测试模式产物不能冒充生产包。`--output` 可指定隔离输出目录；固定 `--publish never`。
+
+复用依据是源码、配置、依赖锁、Node/主机架构、构建模式、Vite四层根环境文件和 `RENDERER_VITE_*` 构建变量的摘要，以及全部生成文件的摘要。不会将变量原文写入元数据。修改后重新编译；没有额外缓存服务。electron-vite 会设置 NODE_ENV，因此不把终端的原始 NODE_ENV 当作输入。
+
+Windows默认使用上游支持的 `ELECTRON_BUILDER_COMPRESSION_LEVEL=3`，紧凑档为9；显式设置该变量可覆盖默认值。NSIS差分打包会将载荷压缩改为normal，因此单设全局 `compression: store` 并不能选择快速的载荷压缩。两档都保留NSIS差分更新、安装器完整性检查和同样的应用内容。UOS继续使用原有XZ格式，默认级别2、紧凑档级别3，保持已有包管理器格式和安装钩子。
+
+启用 ASAR、生产代码压缩，排除 source map 与类型声明；运行依赖仍外置供 Electron 加载，保留许可证。仅保留 `en-US / zh-CN / zh-TW` 的 Electron 原生语言资源，需要其他语言时修改 `build.electronLanguages`。ASAR 本身是归档格式，不是压缩算法。static 仅在 resources/static 保留一份，界面热更新仍写入 userData，不修改 app.asar。Windows 图标、NSIS 目录规则及 UOS 安装钩子保持有效。
+
+本轮任务、实测和验收范围见 [specs/002-ipc-packaging/research.md](specs/002-ipc-packaging/research.md)。

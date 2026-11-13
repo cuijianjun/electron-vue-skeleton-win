@@ -9,16 +9,16 @@
       <p>应用：{{ version || '获取中...' }} / 界面：{{ rendererVersion || version }}　环境：{{ env }}</p>
       <p v-if="systemInfo">系统：{{ systemInfo.osDisplayName || systemInfo.osType }} / {{ systemInfo.cpuArch }} / 国产化：{{ systemInfo.isDomestic ? '是' : '否' }}</p>
       <button @click="getInfo">获取版本 / 系统信息</button>
-      <p class="tip">IPC 通道：get-version（同步 sendSync）、get-system-info（异步 invoke）</p>
+      <p class="tip">IPC 通道：desktop.app.version / desktop.system.info（异步请求）</p>
     </section>
 
     <!-- ② 窗口控制（IPC send/invoke） -->
     <section class="card">
       <h2>② 窗口控制（IPC invoke 示例）</h2>
-      <button @click="invoke('windows-mini')">最小化</button>
-      <button @click="invoke('window-max')">最大化/还原</button>
-      <button @click="invoke('window-hide')">隐藏</button>
-      <button @click="invoke('window-refresh')">刷新</button>
+      <button @click="$desktop.window.minimize()">最小化</button>
+      <button @click="$desktop.window.maximize()">最大化/还原</button>
+      <button @click="$desktop.window.hide()">隐藏</button>
+      <button @click="$desktop.window.reload()">刷新</button>
       <p class="tip">通道：windows-mini / window-max / window-hide / window-refresh（见 ipcMain.js）</p>
     </section>
 
@@ -27,9 +27,9 @@
       <h2>③ 全量更新（electron-updater）</h2>
       <p class="status">{{ fullUpdateStatus }}</p>
       <progress v-if="fullProgress > 0" :value="fullProgress" max="100"></progress>
-      <button @click="invoke('check-update')">检查全量更新</button>
-      <button v-if="canDownload" @click="invoke('start-update')">下载更新</button>
-      <button v-if="canInstall" @click="invoke('confirm-update')">退出并安装</button>
+      <button @click="$desktop.update.check()">检查全量更新</button>
+      <button v-if="canDownload" @click="$desktop.update.download()">下载更新</button>
+      <button v-if="canInstall" @click="$desktop.update.install()">退出并安装</button>
       <p class="tip">通道：check-update → 主进程推 update-msg（state：0 检查中 / 1 有更新 / 2 无更新 / 3 下载中 / 4 完成）</p>
     </section>
 
@@ -37,9 +37,9 @@
     <section class="card">
       <h2>④ 热更新（增量资源 HotUpdater）</h2>
       <p class="status">{{ hotUpdateStatus }}</p>
-      <button @click="invoke('hot-update')">检查热更新</button>
-      <button v-if="canHotDownload" @click="invoke('start-hot-update')">下载热更新包</button>
-      <button v-if="hotDone" @click="invoke('confirm-hot-update')">重启生效</button>
+      <button @click="$desktop.resources.check()">检查热更新</button>
+      <button v-if="canHotDownload" @click="$desktop.resources.download()">下载热更新包</button>
+      <button v-if="hotDone" @click="$desktop.resources.install()">重启生效</button>
       <p class="tip">通道：hot-update → 主进程推 hot-update-status（update-available/downloading/moving/finished）</p>
     </section>
 
@@ -49,18 +49,18 @@
       <p>浏览器地址栏输入 <code>myapp://openapp?token=abc123</code> 回车，观察这里收到的参数：</p>
       <pre v-if="deepLink" class="result">{{ deepLink }}</pre>
       <p v-else class="status">（尚未收到深链参数）</p>
-      <p class="tip">主进程 index.js 解析 myapp:// 后通过 webContents.send('deep-link-params', ...) 推送到此</p>
+      <p class="tip">主进程 index.js 解析 myapp:// 后通过 统一通信入口推送 deep-link-params 推送到此</p>
     </section>
 
     <!-- ⑥ iframe 内嵌 -->
     <section class="card">
-      <h2>⑥ iframe 内嵌网页（webviewTag）</h2>
+      <h2>⑥ iframe 内嵌网页（普通 iframe）</h2>
       <input v-model="iframeUrl" placeholder="输入要嵌入的 https 地址" class="url-input" />
       <div>
         <button @click="goIframe">跳转到 iframe 视图</button>
       </div>
       <p class="tip">
-        走 /iframe 路由（views/iframe/index.vue），通过 query 传 src；主进程 webPreferences 已开 webviewTag:true
+        走 /iframe 路由（views/iframe/index.vue），通过 query 传 src；iframe 不具有 Electron 权限
       </p>
     </section>
 
@@ -73,7 +73,7 @@
       <button @click="getStore">读取</button>
       <button @click="deleteStore">删除</button>
       <p class="status">读取结果：{{ storeResult }}</p>
-      <p class="tip">通道：setStore / getStore / deleteOne（sendSync 同步，见 ipcFun.js 的 initStore）</p>
+      <p class="tip">通道：desktop.settings.set / get / delete（异步确认与跨窗口缓存同步）</p>
     </section>
   </div>
 </template>
@@ -107,41 +107,23 @@ export default {
     }
   },
   methods: {
-    subscribe(channel, callback) {
-      this._ipcStops ||= new Map()
-      this._ipcStops.get(channel)?.()
-      const stop = this.$ipcRenderer.subscribe(channel, callback)
-      this._ipcStops.set(channel, stop)
-      return stop
+    subscribe(channel,callback){return this._desktop.events.on(channel,callback)},
+    async getInfo(){
+      [this.version,this.systemInfo,this.rendererVersion]=await Promise.all([
+        this.$desktop.app.version(),this.$desktop.system.info(),this.$desktop.app.rendererVersion()
+      ])
     },
-    // 异步 IPC（invoke → ipcMain.handle）
-    invoke(channel, ...args) {
-      return this.$ipcRenderer.invoke(channel, ...args)
+    async setStore(){
+      await this.$desktop.settings.set(this.storeKey,this.storeValue)
+      this.storeResult=`已写入 ${this.storeKey} = ${this.storeValue}`
     },
-    // 同步 IPC（sendSync → ipcMain.on + returnValue）
-    sendSync(channel, ...args) {
-      return this.$ipcRenderer.sendSync(channel, ...args)
+    async getStore(){
+      const value=await this.$desktop.settings.get(this.storeKey)
+      this.storeResult=value===''?'（空值）':`${this.storeKey} = ${value}`
     },
-
-    // ① 获取版本与系统信息
-    async getInfo() {
-      this.version = this.sendSync('get-version')
-      this.systemInfo = await this.invoke('get-system-info')
-      this.rendererVersion = await this.invoke('get-resource-version')
-    },
-
-    // ⑦ electron-store 增删查
-    setStore() {
-      this.$ipcRenderer.send('setStore', this.storeKey, this.storeValue)
-      this.storeResult = `已写入 ${this.storeKey} = ${this.storeValue}`
-    },
-    getStore() {
-      const v = this.sendSync('getStore', this.storeKey)
-      this.storeResult = v === '' ? '（空值）' : `${this.storeKey} = ${v}`
-    },
-    deleteStore() {
-      this.$ipcRenderer.send('deleteOne', this.storeKey)
-      this.storeResult = `已删除 ${this.storeKey}`
+    async deleteStore(){
+      await this.$desktop.settings.delete(this.storeKey)
+      this.storeResult=`已删除 ${this.storeKey}`
     },
 
     // ⑥ 跳转 iframe 视图
@@ -150,10 +132,11 @@ export default {
     }
   },
   mounted() {
+    this._desktop=this.$desktop.scope()
     this.getInfo()
 
     // ============ ③ 全量更新事件（主进程 → 渲染进程） ============
-    this.subscribe('update-msg', (e, info) => {
+    this.subscribe('update-msg', info => {
       // info = { state, msg }，state 见 checkupdate.js 状态机
       switch (info.state) {
         case 0:
@@ -187,7 +170,7 @@ export default {
     })
 
     // ============ ④ 热更新事件 ============
-    this.subscribe('hot-update-status', (e, info) => {
+    this.subscribe('hot-update-status', info => {
       switch (info.status) {
         case 'update-not-available':
           this.hotUpdateStatus = '界面已是最新版本'
@@ -217,18 +200,11 @@ export default {
     })
 
     // ============ ⑤ 深链参数事件 ============
-    this.subscribe('deep-link-params', (e, params) => {
+    this.subscribe('deep-link-params', params => {
       this.deepLink = JSON.stringify(params, null, 2)
     })
   },
-  beforeUnmount() {
-    this._ipcStops?.forEach(stop => stop())
-    this._ipcStops?.clear()
-    // 清理监听，防止内存泄漏（每次进入页面都注册，销毁时必须移除）
-
-
-
-  }
+  beforeUnmount(){this._desktop?.dispose()}
 }
 </script>
 

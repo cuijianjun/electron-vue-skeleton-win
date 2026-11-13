@@ -8,21 +8,24 @@ test('update route shows full/resource choices and routes confirmation to the ma
  const app=await _electron.launch({executablePath:require('electron'),args:[path.resolve(__dirname,'../..')],env,timeout:15000})
  try{
   const page=await app.firstWindow();await page.waitForSelector('.home')
-  await page.evaluate(()=>{window.__realDialogBridge=document.querySelector('#app').__vue_app__.config.globalProperties.$ipcRenderer})
+  await page.evaluate(()=>{window.__realDialogBridge=document.querySelector('#app').__vue_app__.config.globalProperties.$desktop})
   for(const full of [true,false]){
    await page.evaluate(async full=>{
     localStorage.removeItem('tomorrowTipStartTime')
     const vue=document.querySelector('#app').__vue_app__,callbacks={},calls=[]
     window.__dialogCalls=calls
-    vue.config.globalProperties.$ipcRenderer={
-      subscribe(channel,callback){callbacks[channel]=callback;return ()=>delete callbacks[channel]},
-      async invoke(channel){
-       calls.push(channel)
-       if(channel==='get-resource-version')return '1.0.0'
-       if(channel==='check-update'){callbacks['update-msg']?.(null,{state:full?1:2,msg:{version:'1.0.1'}});return {ok:true,available:full,info:{version:'1.0.1'}}}
-       if(channel==='hot-update'){callbacks['hot-update-status']?.(null,{status:'update-available',version:'1.0.1'});return {status:'update-available',version:'1.0.1'}}
-       return {ok:true}
-      }
+    const invoke=async channel=>{
+      calls.push(channel)
+      if(channel==='get-resource-version')return '1.0.0'
+      if(channel==='check-update'){callbacks['update-msg']?.({state:full?1:2,msg:{version:'1.0.1'}});return {ok:true,available:full,info:{version:'1.0.1'}}}
+      if(channel==='hot-update'){callbacks['hot-update-status']?.({status:'update-available',version:'1.0.1'});return {status:'update-available',version:'1.0.1'}}
+      return {ok:true}
+    }
+    vue.config.globalProperties.$desktop={
+      scope(){return {events:{on(channel,callback){callbacks[channel]=callback;return ()=>delete callbacks[channel]}},dispose(){for(const key of Object.keys(callbacks))delete callbacks[key]}}},
+      app:{rendererVersion:()=>invoke('get-resource-version')},
+      update:{check:()=>invoke('check-update'),download:()=>invoke('start-update'),install:()=>invoke('confirm-update')},
+      resources:{check:()=>invoke('hot-update'),download:()=>invoke('start-hot-update'),install:()=>invoke('confirm-hot-update')}
     }
     await vue.config.globalProperties.$router.push('/updateTip')
    },full)
@@ -37,7 +40,7 @@ test('update route shows full/resource choices and routes confirmation to the ma
    await page.getByRole('button',{name:'明天提醒我'}).click()
    await page.locator('.loopDialog').waitFor({state:'hidden'})
    assert.ok(await page.evaluate(()=>Number(localStorage.getItem('tomorrowTipStartTime')))>0)
-   await page.evaluate(async()=>{const vue=document.querySelector('#app').__vue_app__;vue.config.globalProperties.$ipcRenderer=window.__realDialogBridge;await vue.config.globalProperties.$router.push('/')})
+   await page.evaluate(async()=>{const vue=document.querySelector('#app').__vue_app__;vue.config.globalProperties.$desktop=window.__realDialogBridge;await vue.config.globalProperties.$router.push('/')})
    await page.waitForSelector('.home')
   }
  }finally{await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close();await fs.rm(userData,{recursive:true,force:true})}

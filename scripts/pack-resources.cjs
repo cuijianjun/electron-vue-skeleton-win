@@ -1,3 +1,4 @@
+const {isFresh}=require('./build-info.cjs')
 const semver=require('semver')
 const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto')
 const AdmZip=require('adm-zip')
@@ -9,7 +10,7 @@ if(!['win32','linux'].includes(platform)||!['x64','arm64'].includes(arch)||!semv
 const pkg=require('../package.json'),output=path.resolve(arg('out')||path.join(root,'release','resources',platform+'-'+arch))
 const build=path.join(root,'dist/electron')
 const metadata=JSON.parse(fs.readFileSync(path.join(build,'runtime-build.json'),'utf8'))
-if(metadata.lockHash!==crypto.createHash('sha256').update(fs.readFileSync(path.join(root,'package-lock.json'))).digest('hex')||metadata.appVersion!==pkg.version||metadata.electronVersion!==pkg.devDependencies.electron)throw new Error('Runtime build identity is stale; run build:app first')
+if(!isFresh(root)||metadata.lockHash!==crypto.createHash('sha256').update(fs.readFileSync(path.join(root,'package-lock.json'))).digest('hex')||metadata.appVersion!==pkg.version||metadata.electronVersion!==pkg.devDependencies.electron)throw new Error('Runtime build identity is stale; run build:app first')
 const key=crypto.createPrivateKey(fs.readFileSync(keyFile))
 if(key.asymmetricKeyType!=='ed25519')throw new Error('Use an Ed25519 private key kept outside the repository')
 const zip=new AdmZip();zip.addLocalFolder(path.join(build,'renderer'))

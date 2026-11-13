@@ -53,23 +53,18 @@ export default {
   data(){return {tomorrowTipVis:false,dialogVisible:false,btnLoading:false,percentage:0,updateInfo:{},progressStatus:null,version,forceUpdate:false,fullUpdate:false,updateContent:'',timer:null,checking:false}},
   computed:{btnInfo(){return this.btnLoading?'下载中':this.progressStatus==='exception'?'重新检查':'立即下载'}},
   mounted(){
+    this._desktop=this.$desktop.scope()
     this.refreshReminder()
-    this.subscribe('update-msg',(_event,info)=>this.onFullUpdate(info))
-    this.subscribe('hot-update-status',(_event,info)=>this.onResourceUpdate(info))
+    this.subscribe('update-msg',info=>this.onFullUpdate(info))
+    this.subscribe('hot-update-status',info=>this.onResourceUpdate(info))
     if(import.meta.env.RENDERER_VITE_UPDATE_ENABLED==='true'){
       this.getUpdateInfo()
       this.timer=setInterval(()=>this.getUpdateInfo(),12*3600*1000)
     }
   },
-  beforeUnmount(){this._ipcStops?.forEach(stop=>stop());this._ipcStops?.clear();clearInterval(this.timer)},
+  beforeUnmount(){this._desktop?.dispose();clearInterval(this.timer)},
   methods:{
-    subscribe(channel,callback){
-      this._ipcStops ||= new Map()
-      this._ipcStops.get(channel)?.()
-      const stop=this.$ipcRenderer.subscribe(channel,callback)
-      this._ipcStops.set(channel,stop)
-      return stop
-    },
+    subscribe(channel,callback){return this._desktop.events.on(channel,callback)},
     refreshReminder(){
       const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()
       const reminded=Number(localStorage.getItem('tomorrowTipStartTime'))||0
@@ -80,11 +75,11 @@ export default {
       this.checking=true;this.progressStatus=null;this.percentage=0;this.fullUpdate=true
       this.refreshReminder()
       try{
-        const full=await this.$ipcRenderer.invoke('check-update')
+        const full=await this.$desktop.update.check()
         if(full?.ok&&full.available){this.showFull(full.info||{});return}
         this.fullUpdate=false;this.forceUpdate=false
-        this.version=await this.$ipcRenderer.invoke('get-resource-version')
-        const resource=await this.$ipcRenderer.invoke('hot-update')
+        this.version=await this.$desktop.app.rendererVersion()
+        const resource=await this.$desktop.resources.check()
         if(resource?.status==='update-available')this.showResource(resource)
         else if(resource?.status==='update-not-available')this.dialogVisible=false
         else if(resource?.status==='failed'||resource?.status==='busy')this.showFailure(resource.message||full?.error||'更新检查失败')
@@ -124,7 +119,7 @@ export default {
     finish(message){
       this.progressStatus='success';this.btnLoading=false
       if(window.confirm(message)){
-        this.$ipcRenderer.invoke(this.fullUpdate?'confirm-update':'confirm-hot-update').then(result=>{
+        (this.fullUpdate?this.$desktop.update.install():this.$desktop.resources.install()).then(result=>{
           if(result?.ok===false)this.showFailure(result.error)
         }).catch(error=>this.showFailure(error.message))
       }
@@ -135,7 +130,7 @@ export default {
       if(this.progressStatus==='exception'){await this.getUpdateInfo();return}
       this.btnLoading=true
       try{
-        const result=await this.$ipcRenderer.invoke(this.fullUpdate?'start-update':'start-hot-update')
+        const result=await (this.fullUpdate?this.$desktop.update.download():this.$desktop.resources.download())
         if(result?.ok===false||result?.status==='failed'||result?.status==='busy')this.showFailure(result.error||result.message)
       }catch(error){this.showFailure(error.message)}
     },

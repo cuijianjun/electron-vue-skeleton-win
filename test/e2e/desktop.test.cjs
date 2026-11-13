@@ -42,10 +42,10 @@ test('production Electron: Vue routes, narrow IPC, persistence and isolated wind
       ipc.subscribe('w-max',callback)
       oldStop()
     })
-    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('w-max',true))
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('desktop:event',{operation:'w-max',args:[true]}))
     await page.waitForFunction(()=>window.__eventHits===1)
     await page.evaluate(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$ipcRenderer.removeAllListeners('w-max'))
-    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('w-max',false))
+    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.send('desktop:event',{operation:'w-max',args:[false]}))
     assert.equal(await page.evaluate(()=>window.__eventHits),1)
     await page.evaluate(()=>{window.__maxStates=[];window.__stopMax=window.electronAPI.events['w-max'](value=>window.__maxStates.push(value))})
     for(let i=0;i<2;i++){
@@ -58,6 +58,23 @@ test('production Electron: Vue routes, narrow IPC, persistence and isolated wind
     await page.evaluate(()=>window.electronAPI.calls['open-win']({url:'/updateTip'}))
     const child=await childPromise
     await child.waitForFunction(()=>Boolean(window.electronAPI))
+    await child.evaluate(()=>window.electronAPI.ready())
+    await page.evaluate(()=>window.electronAPI.writes.setStore('cross-window',false))
+    await child.waitForFunction(()=>window.electronAPI.reads.getStore('cross-window')===false)
+    await child.evaluate(()=>window.electronAPI.writes.setStore('cross-window',0))
+    await page.waitForFunction(()=>window.electronAPI.reads.getStore('cross-window')===0)
+    // A scope's cleanup cannot remove a different component's listeners.
+    await page.evaluate(()=>{
+      const desktop=document.querySelector('#app').__vue_app__.config.globalProperties.$desktop
+      const a=desktop.scope(),b=desktop.scope();window.__scopeHits=[]
+      a.events.on('w-max',()=>window.__scopeHits.push('a'))
+      b.events.on('w-max',()=>window.__scopeHits.push('b'))
+      a.dispose();window.__stopScope=()=>b.dispose()
+    })
+    await app.evaluate(({BrowserWindow},id)=>BrowserWindow.fromId(id).webContents.send('desktop:event',{operation:'w-max',args:[true]}),mainId)
+    await page.waitForFunction(()=>window.__scopeHits.join(',')==='b')
+    await page.evaluate(()=>window.__stopScope())
+
     assert.equal(await child.evaluate(()=>window.electronAPI.calls['get-version']()),'1.0.0')
     assert.equal(await child.evaluate(()=>window.electronAPI.calls['renderer-ready']()),false)
     await app.evaluate(({BrowserWindow},mainId)=>{

@@ -20,7 +20,7 @@ test('signed renderer update survives restart and broken first startup recovers 
  const server=http.createServer((req,res)=>{if(req.url==='/manifest.json'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(response.manifest))}else if(req.url==='/renderer.zip')res.end(response.archive);else{res.statusCode=404;res.end()}})
  await new Promise(r=>server.listen(0,'127.0.0.1',r))
  const env={...process.env,NODE_ENV:'production',SKELETON_E2E:'1',SKELETON_USER_DATA:root,RESOURCE_UPDATE_PUBLIC_KEY_FILE:keyFile,RESOURCE_UPDATE_URL:'http://127.0.0.1:'+server.address().port+'/manifest.json'};delete env.ELECTRON_RUN_AS_NODE
- async function launch(){app=await _electron.launch({executablePath:require('electron'),args:[appRoot],cwd:appRoot,env,timeout:15000});return app.firstWindow()}
+ async function launch(){app=await _electron.launch({executablePath:process.env.SKELETON_PACKAGED_EXECUTABLE||require('electron'),args:process.env.SKELETON_PACKAGED_EXECUTABLE?[]:[appRoot],cwd:appRoot,env,timeout:15000});return app.firstWindow()}
  async function close(){if(app){await app.evaluate(({app})=>app.exit(0)).catch(()=>{});await app.close();app=null}}
  async function update(page){
   await page.evaluate(()=>window.electronAPI.calls['hot-update']())
@@ -29,6 +29,7 @@ test('signed renderer update survives restart and broken first startup recovers 
  }
  try{
   prepare();let page=await launch();await page.waitForSelector('.home')
+  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),root)
   await page.evaluate(()=>window.electronAPI.writes.setStore('survives-update',false))
   const saved=response.archive;response.archive=Buffer.from('corrupted transport')
   await page.evaluate(()=>window.electronAPI.calls['hot-update']())

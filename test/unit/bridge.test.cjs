@@ -1,9 +1,9 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { validate, INVOKE, SYNC } = require('../../src/shared/ipc-contract.cjs')
+const { validate, INVOKE, SYNC } = require('../../src/shared/ipc.mjs')
 const { assertSender } = require('../../src/main/services/ipcPolicy.cjs')
 
-test('version supports both invoke and the existing synchronous read', () => {
+test('version supports both invoke and the cached legacy read', () => {
   assert.ok(INVOKE.includes('get-version'))
   assert.ok(SYNC.includes('get-version'))
 })

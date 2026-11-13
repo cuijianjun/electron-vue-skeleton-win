@@ -1,3 +1,4 @@
+const {sendEvent}=require('../../shared/ipc.mjs')
 class UpdateController {
  constructor(updater,tokenFactory){
    this.updater=updater;this.tokenFactory=tokenFactory;this.owner=null;this.state='idle';this.generation=0
@@ -6,7 +7,7 @@ class UpdateController {
    updater.on('error',error=>{if(this.state==='installing')this.fail(error)})
    updater.on('download-progress',info=>{if(this.state==='downloading')this.message(3,info)})
  }
- message(state,msg=''){if(this.owner&&!this.owner.isDestroyed())this.owner.webContents.send('update-msg',{state,msg})}
+ message(state,msg=''){if(this.owner&&!this.owner.isDestroyed())sendEvent(this.owner.webContents,'update-msg',{state,msg})}
  fail(error){this.lastError=error.message;this.state='failed';this.message(-1,error.message);return {ok:false,error:error.message}}
  busy(){return ['checking','downloading','cancelling','installing'].includes(this.state)}
  async check(window,source){

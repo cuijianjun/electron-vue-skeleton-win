@@ -1,3 +1,4 @@
+import { secureIpcMain as desktopIpc } from './secureIpc'
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,7 +14,7 @@ export function startDownload(window,options){
  if(options.directory)policy.downloadPath(app.getPath('downloads'),options.directory,directories.get(window.webContents.id)||new Set(),'probe')
  if(pending.has(window.id))throw new Error('A download request is already starting')
  const contents=window.webContents,session=contents.session
- const send=(channel,value)=>{if(!window.isDestroyed())contents.send(channel,value)}
+ const send=(channel,value)=>{if(!window.isDestroyed())desktopIpc.send(contents,channel,value)}
  let timer
  const cleanup=()=>{session.removeListener('will-download',listener);window.removeListener('closed',cleanup);clearTimeout(timer);pending.delete(window.id)}
  const listener=(event,item,owner)=>{

@@ -1,10 +1,11 @@
+const {sendEvent}=require('../../shared/ipc.mjs')
 const semver=require('semver')
 const resources=require('./resourceUpdates.cjs')
 class ResourceUpdateController {
  constructor({options,readManifest,readArchive}){this.options=options;this.readManifest=readManifest;this.readArchive=readArchive;this.sequence=0;this.busy=false;this.candidate=null}
  notify(window,status,extra={}){
    const result={status,...extra}
-   if(window&&!window.isDestroyed())window.webContents.send('hot-update-status',result)
+   if(window&&!window.isDestroyed())sendEvent(window.webContents,'hot-update-status',result)
    return result
  }
  async check(window){

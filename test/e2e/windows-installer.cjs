@@ -115,6 +115,7 @@ public static class SkeletonNsisUI {
   app=await _electron.launch({executablePath:exe,args:[],env,timeout:20000})
   const page=await app.firstWindow();await page.waitForSelector('.home',{timeout:20000})
   assert.equal(await app.evaluate(({app})=>app.isPackaged),true)
+  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),profile)
   assert.equal(await page.evaluate(()=>window.electronAPI.calls['get-version']()),version)
   return page
  }
@@ -160,8 +161,13 @@ public static class SkeletonNsisUI {
   const upgraded=await open('1.0.1')
   assert.deepEqual(await upgraded.evaluate(()=>window.electronAPI.reads.getStore('installer-regression')),{value:'retained 中文',zero:0,flag:false})
   const store=path.join(profile,'config.json');assert.ok(fs.existsSync(store));const saved=fs.readFileSync(store)
-  await close();command(uninstaller,['/currentuser','/S'])
-  for(let attempt=0;attempt<60&&!clean();attempt++)await delay(250)
+  await close()
+  // NSIS normally returns from a launcher before its temporary uninstaller finishes.
+  // Match builder's old-version removal: copy outside INSTDIR and wait for the actual actor.
+  const actor=path.join(root,'uninstall.exe')
+  await fsp.copyFile(uninstaller,actor)
+  command(actor,['/currentuser','/S','_?='+install],{windowsVerbatimArguments:true,argv0:'"'+actor+'"'})
+  assert.ok(!fs.existsSync(install),'The actual uninstaller must remove its installation directory')
   assert.ok(clean(),'Installer files, registration and shortcuts must all be removed')
   assert.deepEqual(fs.readFileSync(store),saved)
   console.log('Native provider error/cancel/download/confirm wizard, registered protocol, NSIS 1.0.0→1.0.1 and data retention passed')
@@ -173,8 +179,10 @@ public static class SkeletonNsisUI {
   try{server.closeAllConnections();await new Promise(resolve=>server.close(resolve))}catch(error){errors.push(error)}
   try{
    assert.ok(stopped,'Preserve live installer fixture: '+root)
-   if(fs.existsSync(uninstaller))command(uninstaller,['/currentuser','/S'])
-   for(let attempt=0;attempt<60&&fs.existsSync(exe);attempt++)await delay(250)
+   if(fs.existsSync(uninstaller)){
+    const actor=path.join(root,'cleanup-uninstall.exe');await fsp.copyFile(uninstaller,actor)
+    command(actor,['/currentuser','/S','_?='+install],{windowsVerbatimArguments:true,argv0:'"'+actor+'"'})
+   }
    // Baseline keys/shortcuts were absent. Remove a partial install only when its current target is exactly our fixture.
    for(const {key,view} of remainingKeys()){
     const values=query(key,view).stdout.toLowerCase()

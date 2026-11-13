@@ -13,7 +13,7 @@
     "build:test": "electron-vite build --mode test",
     "build:win64": "node scripts/build.cjs --platform win32 --arch x64",
     "build:win32": "node scripts/build.cjs --platform win32 --arch ia32",
-    "build:dir": "electron-vite build && electron-builder --dir --publish never",
+    "build:dir": "node scripts/build.cjs --phase dir",
     "build:clean": "node scripts/clean.cjs",
     "pack:resources": "node scripts/pack-resources.cjs",
     "update:serve": "node server/index.js",
@@ -23,10 +23,13 @@
     "test:dev": "node --test test/e2e/hmr.cjs",
     "test:packaged": "node --test test/e2e/packaged.cjs",
     "start": "electron-vite preview",
-    "test:windows": "node --test test/e2e/windows-installer.cjs"
+    "test:windows": "node --test test/e2e/windows-installer.cjs",
+    "pack:dir": "node scripts/build.cjs --phase dir --skip-build",
+    "pack:release": "node scripts/build.cjs --skip-build",
+    "build:compact": "node scripts/build.cjs --compact"
   },
   "build": {
-    "asar": false,
+    "asar": true,
     "compression": "store",
     "productName": "myapp",
     "appId": "com.example.myapp",
@@ -51,7 +54,9 @@
     },
     "files": [
       "dist/electron/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.map",
+      "!**/*.d.ts"
     ],
     "extraResources": [
       {
@@ -70,7 +75,12 @@
       "allowToChangeInstallationDirectory": true,
       "include": "installer.nsh",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "electronLanguages": [
+      "en-US",
+      "zh-CN",
+      "zh-TW"
+    ]
   },
   "dependencies": {
     "adm-zip": "^0.5.10",

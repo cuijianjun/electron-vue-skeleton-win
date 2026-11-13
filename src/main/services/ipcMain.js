@@ -2,29 +2,7 @@ import { grantDirectory } from './downloadSession'
 import resources from './resourceUpdates.cjs'
 import { resourceContext } from './resourceContext'
 import { secureIpcMain as ipcMain } from './secureIpc'
-/**
- * ============================================================
- * IPC 注册中心 (ipcMain.js)
- * ============================================================
- * 这里是「主进程 ↔ 渲染进程信息交互」机制的核心。
- *
- * 通信方向说明：
- *   1. 渲染进程 → 主进程
- *      - ipcRenderer.send      发送异步消息  → ipcMain.on 接收
- *      - ipcRenderer.sendSync  发送同步消息  → ipcMain.on 内用 event.returnValue 响应
- *      - ipcRenderer.invoke    发送 Promise  → ipcMain.handle 接收（可 await）
- *   2. 主进程 → 渲染进程
- *      - webContents.send 发送消息 → ipcRenderer.on 监听
- *
- * 本文件用 ipcMain.handle 注册了大量通道，涵盖：
- *   - 窗口控制（最小化/最大化/关闭/隐藏/刷新）
- *   - 文件下载（全量/增量）
- *   - 全量更新 / 热更新
- *   - 系统信息 / 版本号
- *   - 对话框 / 子窗口 / 日志
- * ============================================================
- */
-
+// Business handlers register with the shared transport; native IPC lives in shared/ipc.mjs.
 import { dialog, BrowserWindow, app, shell } from 'electron'
 import { winURL } from '../config/StaticPath'
 import downloadFile from './downloadFile'
@@ -146,15 +124,7 @@ export default {
 				return null
 			}
 		})
-		// 获取系统信息摘要（同步）
-		ipcMain.on('get-system-summary', (event) => {
-			try {
-				event.returnValue = getSystemSummary()
-			} catch (error) {
-				console.error('[IPC] Failed to get system summary', error)
-				event.returnValue = 'Unknown System'
-			}
-		})
+		ipcMain.handle('get-system-summary', () => getSystemSummary())
 		// 获取安装包版本（异步）
 		ipcMain.handle('get-install-version', async () => {
 			try {
@@ -172,14 +142,12 @@ export default {
 		})
 		// 获取版本字符串（同步）
 		ipcMain.handle('get-version', () => getVersion())
-        ipcMain.on('get-version', (event) => {
-			try {
-				event.returnValue = getVersion()
-			} catch (error) {
-				console.error('[IPC] Failed to get version', error)
-				event.returnValue = '0.0.0'
-			}
-		})
+        ipcMain.handle('desktop-bootstrap', async event => {
+            const [version, systemSummary, settings] = await Promise.all([
+                ipcMain.dispatch(event,'get-version'), ipcMain.dispatch(event,'get-system-summary'), ipcMain.dispatch(event,'settings:snapshot')
+            ])
+            return {version,systemSummary,settings,clientId:event.sender.id}
+        })
 
 		// ============ 对话框 ============
 		ipcMain.handle('open-messagebox', async (event, arg) => {
@@ -232,13 +200,13 @@ export default {
             })
             children.set(options.url, child)
             child.on('closed', () => children.delete(options.url))
-            child.on('maximize', () => child.webContents.send('w-max', true))
-            child.on('unmaximize', () => child.webContents.send('w-max', false))
+            child.on('maximize', () => ipcMain.send(child.webContents,'w-max', true))
+            child.on('unmaximize', () => ipcMain.send(child.webContents,'w-max', false))
             const target = new URL(winURL); target.hash = options.url
             const splash=loadingOtherWindow()
             try { await child.loadURL(target.href) } finally { if(!splash.isDestroyed())splash.destroy() }
             child.show()
-            if (options.sendData !== undefined) child.webContents.send('send-data', options.sendData)
+            if (options.sendData !== undefined) ipcMain.send(child.webContents,'send-data', options.sendData)
             return { id: child.id }
         })
 
