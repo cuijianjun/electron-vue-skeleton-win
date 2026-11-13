@@ -10,7 +10,7 @@
 // true  = 先弹出一个轻量 loading 窗口，主窗口加载完成后自动销毁
 // false = 直接创建主窗口，不做启动屏过渡
 // 这就是「提高首屏加载」机制的核心开关。
-export const UseStartupChart = true
+export const UseStartupChart = process.env.SKELETON_E2E !== '1'
 
 // 是否使用系统原生标题栏
 // false = 使用自定义无边框窗口（frame:false），由前端自绘标题栏

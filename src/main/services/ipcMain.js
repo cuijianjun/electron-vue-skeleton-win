@@ -1,3 +1,7 @@
+import { grantDirectory } from './downloadSession'
+import resources from './resourceUpdates.cjs'
+import { resourceContext } from './resourceContext'
+import { secureIpcMain as ipcMain } from './secureIpc'
 /**
  * ============================================================
  * IPC 注册中心 (ipcMain.js)
@@ -21,7 +25,7 @@
  * ============================================================
  */
 
-import { ipcMain, dialog, BrowserWindow, app, shell } from 'electron'
+import { dialog, BrowserWindow, app, shell } from 'electron'
 import { winURL } from '../config/StaticPath'
 import downloadFile from './downloadFile'
 import download from './download'
@@ -31,7 +35,7 @@ import { openDevTools } from '../config/const'
 import { updater } from './HotUpdater'
 import fs from 'fs'
 import { getLogPath } from '../config/logger'
-import { getSystemInfo, getSystemSummary } from '../../renderer/utils/ipc/systemDetect'
+import { getSystemInfo, getSystemSummary } from '../utils/systemDetect.js'
 import { getInstalledPackageVersion, getVersion } from '../utils/installVersion'
 import path from 'path'
 
@@ -46,6 +50,8 @@ export default {
 	Mainfunc(IsUseSysTitle) {
 		// 全量更新实例
 		const allUpdater = new Update()
+        ipcMain.handle('get-resource-version', () => resources.resourceInfo(resourceContext()).runningVersion)
+        ipcMain.handle('renderer-ready', event => { const owner=BrowserWindow.fromWebContents(event.sender); if(!owner || owner.getParentWindow())return false; resources.confirm(resourceContext()); return true })
 
 		// ============ 窗口控制 ============
 		ipcMain.handle('IsUseSysTitle', async () => {
@@ -69,7 +75,7 @@ export default {
 			console.log(pathname, 'pathname')
 			if (!whiteList.includes(pathname)) {
 				BrowserWindow.fromWebContents(event.sender)?.hide()
-				event.preventDefault()
+
 			} else {
 				BrowserWindow.fromWebContents(event.sender)?.hide()
 				BrowserWindow.fromWebContents(event.sender)?.close()
@@ -77,7 +83,7 @@ export default {
 		})
 		ipcMain.handle('window-hide', (event) => {
 			BrowserWindow.fromWebContents(event.sender)?.hide()
-			event.preventDefault()
+
 		})
 		ipcMain.handle('window-refresh', (event) => {
 			BrowserWindow.fromWebContents(event.sender)?.reload()
@@ -86,27 +92,28 @@ export default {
 		// ============ 文件下载 ============
 		// 全量下载（带同名处理/进度/完成事件）
 		ipcMain.handle('files-download', (event, args) => {
-			download.download(BrowserWindow.fromWebContents(event.sender), args)
+			return download.download(BrowserWindow.fromWebContents(event.sender), args)
 		})
 		// 简单下载（默认保存到下载目录）
 		ipcMain.handle('start-download', (event, args) => {
-			downloadFile.download(BrowserWindow.fromWebContents(event.sender), args)
+			return downloadFile.download(BrowserWindow.fromWebContents(event.sender), args)
 		})
 
 		// ============ 全量更新 ============
 		ipcMain.handle('check-update', (event) => {
-			allUpdater.checkUpdate(BrowserWindow.fromWebContents(event.sender))
+			return allUpdater.checkUpdate(BrowserWindow.fromWebContents(event.sender))
 		})
-		ipcMain.handle('start-update', () => {
-			allUpdater.handleDownload()
+		ipcMain.handle('cancel-update', () => allUpdater.cancel())
+        ipcMain.handle('start-update', () => {
+			return allUpdater.handleDownload()
 		})
 		ipcMain.handle('confirm-update', () => {
-			allUpdater.quitInstall()
+			return allUpdater.quitInstall()
 		})
 
 		// ============ 热更新 ============
 		ipcMain.handle('hot-update', (event) => {
-			updater(BrowserWindow.fromWebContents(event.sender))
+			return updater(BrowserWindow.fromWebContents(event.sender))
 		})
 		ipcMain.handle('confirm-hot-update', () => {
 			app.relaunch()
@@ -153,7 +160,7 @@ export default {
 			try {
 				const result = getInstalledPackageVersion()
 				console.log('[IPC] Install version:', result)
-				return result
+				return { ...result, rendererVersion: resources.resourceInfo(resourceContext()).runningVersion }
 			} catch (error) {
 				console.error('[IPC] Failed to get install version', error)
 				return {
@@ -164,7 +171,8 @@ export default {
 			}
 		})
 		// 获取版本字符串（同步）
-		ipcMain.on('get-version', (event) => {
+		ipcMain.handle('get-version', () => getVersion())
+        ipcMain.on('get-version', (event) => {
 			try {
 				event.returnValue = getVersion()
 			} catch (error) {
@@ -192,7 +200,7 @@ export default {
 		})
 
 		// 打开目录选择对话框
-		ipcMain.handle('open-directory', async () => {
+		ipcMain.handle('open-directory', async (event) => {
 			try {
 				const res = await dialog.showOpenDialog({
 					properties: ['openDirectory']
@@ -200,7 +208,8 @@ export default {
 				if (res.canceled) {
 					return false
 				}
-				return res.filePaths[0]
+				grantDirectory(event.sender, res.filePaths[0])
+                return res.filePaths[0]
 			} catch (error) {
 				return false
 			}
@@ -208,76 +217,30 @@ export default {
 
 		// ============ 子窗口 (open-win) ============
 		// 用于打开独立子窗口（配合 loadingOtherWindow 启动屏）
-		let childWin = null
-		let cidArray = []
-		ipcMain.handle('open-win', (event, arg) => {
-			let cidJson = { id: null, url: '' }
-			const windowOptions = arg
-			// 去重：同 URL 已打开则聚焦，否则新建
-			let data = cidArray.filter((currentValue) => {
-				if (currentValue.url === arg.url) {
-					return currentValue
-				}
-			})
-			if (data.length > 0) {
-				let currentWindow = BrowserWindow.fromId(data[0].id)
-				currentWindow.focus()
-			} else {
-				let parentID = event.sender.id
-				childWin = new BrowserWindow({
-					width: windowOptions?.width || 842,
-					height: windowOptions?.height || 595,
-					useContentSize: true,
-					autoHideMenuBar: true,
-					resizable: windowOptions?.resizable ?? false,
-					minWidth: windowOptions?.minWidth || 842,
-					minHeight: windowOptions?.minHeight,
-					show: windowOptions?.show ?? false,
-					opacity: windowOptions?.opacity || 1.0,
-					parent: parentID,
-					frame: IsUseSysTitle,
-					webPreferences: {
-						nodeIntegration: true,
-						webSecurity: false,
-						webviewTag: arg?.webview ?? false,
-						devTools: true,
-						scrollBounce: process.platform === 'darwin',
-						contextIsolation: false
-					}
-				})
-				childWin.loadURL(winURL + `#${arg.url}`)
-				cidJson.id = childWin?.id
-				cidJson.url = arg.url
-				cidArray.push(cidJson)
-				// 显示子窗口加载屏
-				var loadingOthersWindow = loadingOtherWindow()
-				childWin.webContents.once('dom-ready', () => {
-					childWin.show()
-					if (process.env.NODE_ENV === 'development' || openDevTools) {
-						childWin.webContents.openDevTools(false)
-					}
-					loadingOthersWindow.destroy()
-					childWin.webContents.send('send-data', arg.sendData)
-				})
-			}
-
-			childWin.on('close', () => {
-				console.log('child-closed')
-				childWin.removeAllListeners()
-				childWin = null
-				cidArray = cidArray.filter(item => item.id !== cidJson.id)
-			})
-			childWin.on('maximize', () => {
-				if (cidJson.id != null) {
-					BrowserWindow.fromId(cidJson.id).webContents.send('w-max', true)
-				}
-			})
-			childWin.on('unmaximize', () => {
-				if (cidJson.id != null) {
-					BrowserWindow.fromId(cidJson.id).webContents.send('w-max', false)
-				}
-			})
-		})
+        const children = new Map()
+        ipcMain.handle('open-win', async (event, options) => {
+            const existing = children.get(options.url)
+            if (existing && !existing.isDestroyed()) { existing.show(); existing.focus(); return { id: existing.id } }
+            const child = new BrowserWindow({
+                width: options.width || 842, height: options.height || 595,
+                minWidth: options.minWidth || 842, minHeight: options.minHeight,
+                useContentSize: true, autoHideMenuBar: true, opacity: options.opacity ?? 1,
+                show: false, frame: IsUseSysTitle, resizable: options.resizable ?? false,
+                parent: BrowserWindow.fromWebContents(event.sender),
+                webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true,
+                    preload: path.join(__dirname, '../preload/index.cjs') }
+            })
+            children.set(options.url, child)
+            child.on('closed', () => children.delete(options.url))
+            child.on('maximize', () => child.webContents.send('w-max', true))
+            child.on('unmaximize', () => child.webContents.send('w-max', false))
+            const target = new URL(winURL); target.hash = options.url
+            const splash=loadingOtherWindow()
+            try { await child.loadURL(target.href) } finally { if(!splash.isDestroyed())splash.destroy() }
+            child.show()
+            if (options.sendData !== undefined) child.webContents.send('send-data', options.sendData)
+            return { id: child.id }
+        })
 
 		// ============ 日志 ============
 		ipcMain.handle('get-log-path', async () => {

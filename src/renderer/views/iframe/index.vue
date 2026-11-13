@@ -14,7 +14,7 @@
   </div>
 </template>
 <script>
-import iFrame from '@/components/iFrame/index'
+import iFrame from '@/components/iFrame/index.vue'
 export default {
   components: {
     iFrame
@@ -27,23 +27,21 @@ export default {
   },
   created() {
     // 从路由 query 获取要加载的地址，如 /iframe?src=https://example.com
-    this.src = this.$route.query.src
+    try { const url = new URL(this.$route.query.src); if (['http:', 'https:'].includes(url.protocol)) this.src = url.href } catch {}
   },
   mounted() {
     this.iframe = document.getElementById('iframe')
-    window.onbeforeunload = function () {
-      return false
-    }
     // 监听子页面 postMessage
     window.addEventListener('message', this.handleMessage)
   },
-  destroyed() {
+  unmounted() {
     window.removeEventListener('message', this.handleMessage)
   },
   methods: {
     // 处理子页面发来的消息
     handleMessage(event) {
-      console.log('收到子页面消息:', event.data)
+      const frame = document.querySelector('iframe')
+      if (!this.src || event.source !== frame?.contentWindow || event.origin !== new URL(this.src).origin || !event.data || typeof event.data !== 'object') return
       // 把子页面消息通过兄弟窗口传值通道转发给主窗口
       this.$ipcRenderer.send('siblingConnect', event.data?.type || event.data)
 

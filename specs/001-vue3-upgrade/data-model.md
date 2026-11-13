@@ -1,0 +1,8 @@
+# Data model
+No new database. Existing electron-store keys and values (including false/0) remain compatible.
+- DesktopBridge: finite named calls/writes/reads/events from src/shared/ipc-contract.cjs; payload guards and top-frame/current-entry sender checks. Event subscriptions return cleanup functions; raw Electron events stay in preload.
+- RuntimeBuild: generated dist/electron/runtime-build.json schemaVersion=1, lockHash, electronVersion, appVersion. The packaged runtime has no source lockfile dependency. Runtime identity additionally hashes main, preload and runtime dependency declarations.
+- RuntimeMatrixRow: OS/version, CPU, libc/session, pinned runtime/tool versions and evidence. Host, package and actual target results are separate; unknown UOS rows stay unverified.
+- ResourceManifest: schemaVersion=1, version, platform, arch, runtimeId, sha256, entry, archive URL and Ed25519 signature. Only renderer files are accepted; traversal, symlinks, incompatible runtime, legacy format, corrupt signature/bytes and non-increasing versions fail closed.
+- ResourceState: atomic state under userData/resource-updates. A signed candidate is staged, marked booting on restart, then confirmed by the main Vue window. Unacknowledged boot rolls back to the last confirmed entry after timeout or on next launch. The controller owns an immutable manifest while downloading; a superseded check cannot replace it.
+- FullUpdateState: idle → checking → available → downloading → downloaded → installing, with cancelling/failed states. Cancellation holds ownership until the download promise settles; late callbacks cannot authorize install. Errors are surfaced; no automatic install on app quit.

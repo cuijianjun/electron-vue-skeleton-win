@@ -21,7 +21,7 @@
 import fs from 'fs'
 import { join, resolve } from 'path'
 import { app } from 'electron'
-import { getSystemInfo, OS_TYPE } from '../../renderer/utils/ipc/systemDetect'
+import { getSystemInfo, OS_TYPE } from '../utils/systemDetect.js'
 
 const FALLBACK_VERSION = '0.0.0'
 const HOT_UPDATE_META_FILENAME = '.hot-update-meta.json'

@@ -2,10 +2,10 @@ import axios from 'axios'
 
 /**
  * axios 实例
- * baseURL 读取 webpack DefinePlugin 注入的 process.env.userConfig（来自 env/*.env）
+ * baseURL 读取 Vite 显式公开的 RENDERER_VITE_API_HOST（来自 env/*.env）
  */
 const service = axios.create({
-  baseURL: process.env.userConfig?.API_HOST || '',
+  baseURL: import.meta.env.RENDERER_VITE_API_HOST || '',
   timeout: 30000
 })
 

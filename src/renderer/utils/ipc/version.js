@@ -1,3 +1,4 @@
+import { ipcRenderer } from './bridge'
 /**
  * ============================================================
  * 渲染进程版本获取工具 (version.js)
@@ -19,7 +20,6 @@ export function getVersion() {
 	if (cachedVersion) return cachedVersion
 
 	try {
-		const { ipcRenderer } = require('electron')
 		const version = ipcRenderer.sendSync('get-version')
 		cachedVersion = version
 		return version
@@ -37,7 +37,6 @@ export async function getVersionDetail() {
 	if (cachedVersionDetail) return cachedVersionDetail
 
 	try {
-		const { ipcRenderer } = require('electron')
 		const result = await ipcRenderer.invoke('get-install-version')
 		cachedVersionDetail = result
 		return result
@@ -58,7 +57,6 @@ export async function getVersionDetail() {
  */
 export async function getFullVersionInfo() {
 	try {
-		const { ipcRenderer } = require('electron')
 
 		const [systemInfo, versionInfo] = await Promise.all([
 			ipcRenderer.invoke('get-system-info'),

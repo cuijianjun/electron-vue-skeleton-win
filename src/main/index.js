@@ -1,3 +1,4 @@
+import './bootstrap'
 'use strict'
 
 /**
@@ -160,7 +161,7 @@ async function onAppReady () {
   }
 
   // 开发环境加载 Vue DevTools（可选，无该目录时自动跳过）
-  if (process.env.NODE_ENV === 'development') {
+  if (process.env.NODE_ENV === 'development' && process.env.SKELETON_E2E !== '1') {
     const vueDevToolsPath = path.resolve('devtools/vue-devtools/6.5.0_0')
     try {
       await session.defaultSession.loadExtension(vueDevToolsPath)
@@ -220,7 +221,7 @@ if (!gotTheLock) {
 app.isReady() ? onAppReady() : app.on('ready', onAppReady)
 
 // 解决 9.x 跨域异常问题（Chromium 安全策略）
-app.commandLine.appendSwitch('disable-features', 'OutOfBlinkCors')
+
 
 // 所有窗口关闭时退出应用
 app.on('window-all-closed', () => {
@@ -237,12 +238,12 @@ if (process.defaultApp) {
     if (deepLinkArg) {
       handleDeepLink(deepLinkArg)
     }
-    app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])])
+    if (process.env.SKELETON_E2E !== '1') app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])])
     logger.info('开发环境：注册 myapp 协议用于测试')
   }
 } else {
   // 生产环境：直接注册协议（打包后由安装器写注册表 / desktop 文件）
-  app.setAsDefaultProtocolClient(PROTOCOL)
+  if (process.env.SKELETON_E2E !== '1') app.setAsDefaultProtocolClient(PROTOCOL)
   logger.info('生产环境：注册 myapp 协议')
 }
 

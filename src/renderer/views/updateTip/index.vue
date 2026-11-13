@@ -27,7 +27,7 @@
           <div class="titleDesc">当前版本: {{ version }}</div>
         </div>
         <div class="content">
-          <div v-if="updateContent" v-html="updateContent"></div>
+          <div v-if="updateContent" style="white-space: pre-wrap">{{ updateContent }}</div>
           <div v-if="percentage" class="progress-bar">
             <div class="progress-inner" :style="{ width: percentage + '%' }"></div>
             <span class="progress-text">{{ percentage }}%</span>
@@ -46,157 +46,108 @@
 </template>
 
 <script>
-import axios from 'axios'
-import { hotPublishConfig } from '../../../main/config/hotPublish'
-const version = require('../../../../package.json').version
-const request = axios.create()
 
+const version=__APP_VERSION__
 export default {
-  name: 'UpdateTip',
-  data() {
-    return {
-      tomorrowTipVis: false, // 已设置的明天提醒
-      dialogVisible: false,
-      btnLoading: false, // 按钮加载属性
-      percentage: 0,
-      updateInfo: {},
-      progressStatus: null,
-      version,
-      forceUpdate: false, // 是否强制更新
-      fullUpdate: false, // 是否是全量更新
-      updateContent: '',
-      timer: null,
-      nowIpUrl: '' // 更新应用接口地址
-    }
-  },
-  computed: {
-    btnInfo() {
-      return this.btnLoading ? '下载中' : '立即下载'
-    }
-  },
-  mounted() {
-    const nowIpStr = this.$ipcRenderer.sendSync('getStore', 'nowIpStr') || ''
-    this.nowIpUrl = `http://${nowIpStr}:${nowIpStr === '20.224.44.205' ? '9999' : '8888'}/packageUpload`
-    console.log('更新组件', this.version, nowIpStr)
-
-    if (process.env.NODE_ENV === 'production') {
-      // 今天零点
-      const todayStartTime = new Date(new Date().toLocaleDateString()).getTime()
-      // 今天零点大于设置时间说明可显示提醒弹框
-      this.tomorrowTipVis = todayStartTime > localStorage.getItem('tomorrowTipStartTime')
-      if (this.timer) {
-        clearInterval(this.timer)
-        this.timer = null
-      }
+  name:'UpdateTip',
+  data(){return {tomorrowTipVis:false,dialogVisible:false,btnLoading:false,percentage:0,updateInfo:{},progressStatus:null,version,forceUpdate:false,fullUpdate:false,updateContent:'',timer:null,checking:false}},
+  computed:{btnInfo(){return this.btnLoading?'下载中':this.progressStatus==='exception'?'重新检查':'立即下载'}},
+  mounted(){
+    this.refreshReminder()
+    this.subscribe('update-msg',(_event,info)=>this.onFullUpdate(info))
+    this.subscribe('hot-update-status',(_event,info)=>this.onResourceUpdate(info))
+    if(import.meta.env.RENDERER_VITE_UPDATE_ENABLED==='true'){
       this.getUpdateInfo()
-      // 每 12 小时轮询一次更新
-      this.timer = setInterval(() => {
-        this.getUpdateInfo()
-      }, 12 * 3600 * 1000)
+      this.timer=setInterval(()=>this.getUpdateInfo(),12*3600*1000)
     }
   },
-  beforeDestroy() {
-    clearInterval(this.timer)
-    this.$ipcRenderer.removeAllListeners('update-msg')
-    this.$ipcRenderer.removeAllListeners('hot-update-status')
-  },
-  methods: {
-    // 获取更新信息
-    async getUpdateInfo() {
-      const res = await request({ url: `${this.nowIpUrl}/message.json?time=${new Date().getTime()}` })
-      const resData = res.data?.length > 0 ? JSON.parse(res.data[0]) : {}
-      this.forceUpdate = resData.forceUpdate ? JSON.parse(resData.forceUpdate) : false
-      this.fullUpdate = resData.fullUpdate ? JSON.parse(resData.fullUpdate) : false
-      this.updateContent = resData.remark
-      if (this.fullUpdate) {
-        // 全量更新
-        this.handleFullUpdate()
-      } else {
-        // 增量更新（热更新）
-        this.handleHotUpdate()
+  beforeUnmount(){this._ipcStops?.forEach(stop=>stop());this._ipcStops?.clear();clearInterval(this.timer)},
+  methods:{
+    subscribe(channel,callback){
+      this._ipcStops ||= new Map()
+      this._ipcStops.get(channel)?.()
+      const stop=this.$ipcRenderer.subscribe(channel,callback)
+      this._ipcStops.set(channel,stop)
+      return stop
+    },
+    refreshReminder(){
+      const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()
+      const reminded=Number(localStorage.getItem('tomorrowTipStartTime'))||0
+      this.tomorrowTipVis=this.forceUpdate||reminded<start
+    },
+    async getUpdateInfo(){
+      if(this.checking||this.btnLoading)return
+      this.checking=true;this.progressStatus=null;this.percentage=0;this.fullUpdate=true
+      this.refreshReminder()
+      try{
+        const full=await this.$ipcRenderer.invoke('check-update')
+        if(full?.ok&&full.available){this.showFull(full.info||{});return}
+        this.fullUpdate=false;this.forceUpdate=false
+        this.version=await this.$ipcRenderer.invoke('get-resource-version')
+        const resource=await this.$ipcRenderer.invoke('hot-update')
+        if(resource?.status==='update-available')this.showResource(resource)
+        else if(resource?.status==='update-not-available')this.dialogVisible=false
+        else if(resource?.status==='failed'||resource?.status==='busy')this.showFailure(resource.message||full?.error||'更新检查失败')
+      }catch(error){this.showFailure(error.message)}
+      finally{this.checking=false}
+    },
+    showFull(info){
+      this.fullUpdate=true;this.version=version;this.updateInfo=info
+      this.forceUpdate=info.forceUpdate===true;this.refreshReminder()
+      this.updateContent=typeof info.releaseNotes==='string'?info.releaseNotes:`发现应用新版本 ${info.version||''}`
+      this.dialogVisible=true
+    },
+    showResource(info){
+      this.fullUpdate=false;this.forceUpdate=false;this.refreshReminder()
+      this.updateContent=`发现界面新版本 ${info.version||''}`
+      this.dialogVisible=true
+    },
+    showFailure(message){
+      this.btnLoading=false;this.progressStatus='exception'
+      this.updateContent=String(message||'更新失败');this.dialogVisible=true
+    },
+    onFullUpdate(info){
+      if(!info)return
+      if(info.state===1)this.showFull(info.msg||{})
+      else if(info.state===3){this.fullUpdate=true;this.percentage=Number(info.msg?.percent||0);this.btnLoading=true}
+      else if(info.state===4){this.fullUpdate=true;this.finish('下载完成，是否立即安装?')}
+      else if(info.state===-1&&this.fullUpdate&&!this.checking)this.showFailure(info.msg)
+    },
+    onResourceUpdate(info){
+      if(!info||(this.fullUpdate&&this.dialogVisible))return
+      if(info.status==='update-available')this.showResource(info)
+      else if(info.status==='downloading'||info.status==='moving')this.btnLoading=true
+      else if(info.status==='finished'){this.fullUpdate=false;this.finish('界面更新已下载，是否立即重启生效?')}
+      else if(info.status==='update-not-available')this.dialogVisible=false
+      else if(info.status==='failed'&&!this.checking)this.showFailure(info.message)
+    },
+    finish(message){
+      this.progressStatus='success';this.btnLoading=false
+      if(window.confirm(message)){
+        this.$ipcRenderer.invoke(this.fullUpdate?'confirm-update':'confirm-hot-update').then(result=>{
+          if(result?.ok===false)this.showFailure(result.error)
+        }).catch(error=>this.showFailure(error.message))
       }
+      this.dialogVisible=false
     },
-    handleConfirm() {
-      this.btnLoading = true
-      if (this.fullUpdate) {
-        this.$ipcRenderer.invoke('start-update')
-      } else {
-        this.$ipcRenderer.invoke('start-hot-update')
-      }
+    async handleConfirm(){
+      if(this.checking)return
+      if(this.progressStatus==='exception'){await this.getUpdateInfo();return}
+      this.btnLoading=true
+      try{
+        const result=await this.$ipcRenderer.invoke(this.fullUpdate?'start-update':'start-hot-update')
+        if(result?.ok===false||result?.status==='failed'||result?.status==='busy')this.showFailure(result.error||result.message)
+      }catch(error){this.showFailure(error.message)}
     },
-    handleClose() {
-      if (!this.forceUpdate) {
-        this.dialogVisible = false
-      } else {
-        alert('请下载最新版本')
-      }
-    },
-    tomorrowTip() {
-      localStorage.setItem('tomorrowTipStartTime', new Date().getTime())
-      this.dialogVisible = false
-    },
-    // 全量更新
-    handleFullUpdate() {
-      this.$ipcRenderer.invoke('check-update')
-      this.$ipcRenderer.on('update-msg', (e, info) => {
-        this.updateInfo = info || {}
-        console.log('Msg返回', info)
-        switch (info.state) {
-          case 1:
-            this.dialogVisible = true
-            break
-          case 3:
-            this.percentage = Number(info?.msg?.percent?.toFixed(1))
-            break
-          case 4:
-            this.progressStatus = 'success'
-            if (window.confirm('下载完成，是否立即更新?')) {
-              this.btnLoading = false
-              this.$ipcRenderer.invoke('confirm-update')
-              this.dialogVisible = false
-            } else {
-              this.btnLoading = false
-              this.dialogVisible = false
-            }
-            break
-          default:
-            break
-        }
-      })
-    },
-    // 增量更新（热更新）
-    handleHotUpdate() {
-      this.$ipcRenderer.invoke('hot-update')
-      this.$ipcRenderer.on('hot-update-status', (event, info) => {
-        console.log('hot-update-status', info)
-        switch (info.status) {
-          case 'update-available':
-            this.dialogVisible = true
-            break
-          case 'downloading':
-            console.log('正在下载')
-            break
-          case 'moving':
-            console.log('正在解压')
-            break
-          case 'finished':
-            this.progressStatus = 'success'
-            if (window.confirm('热更新下载完成，立即重启生效?')) {
-              this.btnLoading = false
-              this.$ipcRenderer.invoke('confirm-hot-update')
-              this.dialogVisible = false
-            } else {
-              this.btnLoading = false
-              this.dialogVisible = false
-            }
-            break
-          default:
-            break
-        }
-      })
+    handleClose(){if(!this.forceUpdate)this.dialogVisible=false;else window.alert('请先更新到最新版本')},
+    tomorrowTip(){
+      if(this.forceUpdate)return
+      localStorage.setItem('tomorrowTipStartTime',String(Date.now()))
+      this.tomorrowTipVis=false;this.dialogVisible=false
     }
   }
 }
+
 </script>
 
 <style scoped>

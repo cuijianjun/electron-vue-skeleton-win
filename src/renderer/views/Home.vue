@@ -1,12 +1,12 @@
 <template>
   <div class="home">
-    <h1>Electron + Vue2 骨架 Demo</h1>
+    <h1>Electron + Vue 3 + Vite 骨架 Demo</h1>
     <p class="sub">本页逐项演示骨架七大机制，代码即文档（对照 README 第七节「代码地图」学习）</p>
 
     <!-- ① 主进程↔渲染进程信息交互（IPC） -->
     <section class="card">
       <h2>① 主进程 ↔ 渲染进程信息交互（IPC）</h2>
-      <p>版本：{{ version || '获取中...' }}　环境：{{ env }}</p>
+      <p>应用：{{ version || '获取中...' }} / 界面：{{ rendererVersion || version }}　环境：{{ env }}</p>
       <p v-if="systemInfo">系统：{{ systemInfo.osDisplayName || systemInfo.osType }} / {{ systemInfo.cpuArch }} / 国产化：{{ systemInfo.isDomestic ? '是' : '否' }}</p>
       <button @click="getInfo">获取版本 / 系统信息</button>
       <p class="tip">IPC 通道：get-version（同步 sendSync）、get-system-info（异步 invoke）</p>
@@ -83,8 +83,9 @@ export default {
   name: 'Home',
   data() {
     return {
-      env: process.env.NODE_ENV,
+      env: import.meta.env.MODE,
       version: '',
+      rendererVersion: '',
       systemInfo: null,
       // 全量更新
       fullUpdateStatus: '未检查',
@@ -106,6 +107,13 @@ export default {
     }
   },
   methods: {
+    subscribe(channel, callback) {
+      this._ipcStops ||= new Map()
+      this._ipcStops.get(channel)?.()
+      const stop = this.$ipcRenderer.subscribe(channel, callback)
+      this._ipcStops.set(channel, stop)
+      return stop
+    },
     // 异步 IPC（invoke → ipcMain.handle）
     invoke(channel, ...args) {
       return this.$ipcRenderer.invoke(channel, ...args)
@@ -119,6 +127,7 @@ export default {
     async getInfo() {
       this.version = this.sendSync('get-version')
       this.systemInfo = await this.invoke('get-system-info')
+      this.rendererVersion = await this.invoke('get-resource-version')
     },
 
     // ⑦ electron-store 增删查
@@ -144,10 +153,12 @@ export default {
     this.getInfo()
 
     // ============ ③ 全量更新事件（主进程 → 渲染进程） ============
-    this.$ipcRenderer.on('update-msg', (e, info) => {
+    this.subscribe('update-msg', (e, info) => {
       // info = { state, msg }，state 见 checkupdate.js 状态机
       switch (info.state) {
         case 0:
+          this.canDownload = false
+          this.canInstall = false
           this.fullUpdateStatus = '正在检查更新...'
           break
         case 1:
@@ -155,6 +166,8 @@ export default {
           this.canDownload = true
           break
         case 2:
+          this.canDownload = false
+          this.canInstall = false
           this.fullUpdateStatus = '已是最新版本'
           break
         case 3:
@@ -166,16 +179,23 @@ export default {
           this.canInstall = true
           break
         case -1:
+          this.canDownload = false
+          this.canInstall = false
           this.fullUpdateStatus = `出错：${info.msg}`
           break
       }
     })
 
     // ============ ④ 热更新事件 ============
-    this.$ipcRenderer.on('hot-update-status', (e, info) => {
+    this.subscribe('hot-update-status', (e, info) => {
       switch (info.status) {
+        case 'update-not-available':
+          this.hotUpdateStatus = '界面已是最新版本'
+          this.canHotDownload = false
+          break
         case 'update-available':
           this.hotUpdateStatus = '发现热更新'
+          this.hotDone = false
           this.canHotDownload = true
           break
         case 'downloading':
@@ -186,24 +206,28 @@ export default {
           break
         case 'finished':
           this.hotUpdateStatus = '热更新完成，重启后生效'
+          this.canHotDownload = false
           this.hotDone = true
           break
         case 'failed':
           this.hotUpdateStatus = `失败：${info.message}`
+          this.canHotDownload = false
           break
       }
     })
 
     // ============ ⑤ 深链参数事件 ============
-    this.$ipcRenderer.on('deep-link-params', (e, params) => {
+    this.subscribe('deep-link-params', (e, params) => {
       this.deepLink = JSON.stringify(params, null, 2)
     })
   },
-  beforeDestroy() {
+  beforeUnmount() {
+    this._ipcStops?.forEach(stop => stop())
+    this._ipcStops?.clear()
     // 清理监听，防止内存泄漏（每次进入页面都注册，销毁时必须移除）
-    this.$ipcRenderer.removeAllListeners('update-msg')
-    this.$ipcRenderer.removeAllListeners('hot-update-status')
-    this.$ipcRenderer.removeAllListeners('deep-link-params')
+
+
+
   }
 }
 </script>

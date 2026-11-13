@@ -22,3 +22,5 @@ build/*.deb
 *.njsproj
 *.sln
 .history/
+
+/release/

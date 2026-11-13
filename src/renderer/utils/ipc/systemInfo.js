@@ -1,3 +1,4 @@
+import { ipcRenderer } from './bridge'
 /**
  * ============================================================
  * 渲染进程系统信息工具 (systemInfo.js)
@@ -60,7 +61,6 @@ export async function getSystemInfo() {
 	if (cachedSystemInfo) return cachedSystemInfo
 
 	try {
-		const { ipcRenderer } = require('electron')
 		const info = await ipcRenderer.invoke('get-system-info')
 
 		if (info) {
@@ -72,8 +72,8 @@ export async function getSystemInfo() {
 	}
 
 	return {
-		platform: process.platform,
-		arch: process.arch,
+		platform: window.electronAPI?.platform,
+		arch: window.electronAPI?.arch,
 		osType: OS_TYPE.UNKNOWN,
 		cpuArch: CPU_ARCH.UNKNOWN,
 		cpuVendor: CPU_VENDOR.UNKNOWN,
@@ -89,7 +89,6 @@ export async function getSystemInfo() {
  */
 export function getSystemSummary() {
 	try {
-		const { ipcRenderer } = require('electron')
 		return ipcRenderer.sendSync('get-system-summary')
 	} catch (error) {
 		console.error('[renderer] Failed to get system summary:', error)
