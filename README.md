@@ -89,7 +89,7 @@ const value = await desktop.settings.get('enabled')
 ## 两种更新
 
 - 全量更新：Electron、main、preload、依赖或安装包变更。通过 APP_UPDATE_URL 配置 generic 元数据目录；未配置时不连接默认生产服务器。Windows 使用 NSIS；UOS 使用所选 updater 的 DEB/包管理器路径，授权及失败恢复仍须实机验收。
-- 界面资源更新：只包含 renderer 文件。schemaVersion=1、Ed25519 签名、SHA256、平台/架构及完整运行时指纹必须匹配。相同/更旧版本不重复安装。暂存后需要主窗口 Vue 启动确认；失败在 12 秒后或下次启动回退。
+- 界面资源更新：只包含 renderer 文件。schemaVersion=1/2、Ed25519 签名、SHA256、平台/架构及完整运行时指纹必须匹配。相同/更旧版本不重复安装。暂存后需要主窗口 Vue 启动确认；失败在 12 秒后或下次启动回退。
 - get-version 表示应用版本；get-resource-version 表示当前界面版本；get-install-version 同时提供 rendererVersion。
 - 私钥保存在项目和客户端之外。客户端配置 RESOURCE_UPDATE_PUBLIC_KEY_FILE 与 RESOURCE_UPDATE_URL；默认没有信任配置时禁用资源更新。旧的全量资源 ZIP/清单会被拒绝，需要先发全量安装包。
 
@@ -158,3 +158,33 @@ Windows默认使用上游支持的 `ELECTRON_BUILDER_COMPRESSION_LEVEL=3`，紧�
 启用 ASAR、生产代码压缩，排除 source map 与类型声明；运行依赖仍外置供 Electron 加载，保留许可证。仅保留 `en-US / zh-CN / zh-TW` 的 Electron 原生语言资源，需要其他语言时修改 `build.electronLanguages`。ASAR 本身是归档格式，不是压缩算法。static 仅在 resources/static 保留一份，界面热更新仍写入 userData，不修改 app.asar。Windows 图标、NSIS 目录规则及 UOS 安装钩子保持有效。
 
 本轮任务、实测和验收范围见 [specs/002-ipc-packaging/research.md](specs/002-ipc-packaging/research.md)。
+
+## 全量与增量更新配置
+
+源码 `config/updates.json` 会复制为安装目录的 `resources/updates.json`，主进程读取这份公开配置；安装后可直接修改，修改后重启应用生效，无需从终端设置环境变量。配置项：
+
+| 字段 | 用途 |
+|---|---|
+| fullURL | 完整安装包更新目录，提供平台对应的 latest*.yml 和安装包 |
+| resourceURL | 增量 renderer 的 manifest.json 地址 |
+| publicKey | Ed25519 发布公钥 PEM 文本；私钥始终保存在客户端/仓库之外 |
+| autoCheck | 进入更新页面时是否自动检查，只有已配置更新源才启动 |
+| intervalHours | 更新页面保持打开期间的检查间隔，1至168小时，默认12 |
+
+`APP_UPDATE_URL`、`RESOURCE_UPDATE_URL`、`RESOURCE_UPDATE_PUBLIC_KEY` 和 `RESOURCE_UPDATE_PUBLIC_KEY_FILE` 可显式覆盖。远程源使用HTTPS，本地夹具仅允许loopback HTTP；空源默认禁用。界面从主进程读取状态，重新打开页面仍能安装已下载包。两个通道互斥，就绪后也须先安装或取消才能使用另一通道。
+
+全量发布流程：更新 package.json/锁文件中的应用版本，使用原平台构建命令生成新包。将 Windows EXE与blockmap，或对应架构DEB上传，再最后更新生成的latest.yml / latest-linux.yml / latest-linux-arm64.yml。每个平台/架构分别使用正确的源目录。Windows安装器走NSIS；Linux由DebUpdater选择DEB并调用包管理器/提权。失败或拒绝授权会回到可重试状态，不伪报安装完成。
+
+增量发布时保留上一版完整renderer目录，修改界面后重新 `npm run build:app`，再运行：
+
+```sh
+npm run pack:resources -- --platform win32 --arch x64 --version 1.0.1 --signing-key /secure/publisher-private.pem --base-dir /archive/1.0.0/renderer --base-version 1.0.0
+```
+
+platform取win32或linux，arch取x64或arm64，与目标客户端一致。客户端应用版本、main、preload、依赖锁与Electron必须保持兼容；运行时变化走全量更新。`--base-dir` 必须是先前真实发布的renderer目录，`--base-version` 是其renderer版本；不能用修改后的目录冒充基线。
+
+带base参数产生schema2：差异ZIP只含新增/修改文件，完整目标清单表达删除；先验证实际基线，再合成独立目录并校验全部目标文件。基线不匹配时只下载同一签名清单约束的完整renderer快照。未传base参数仍生成schema1完整renderer包，兼容既有客户端。旧客户端应先全量升级到支持schema2的应用，再切换差异清单。两个归档都采用内容寻址文件名，先上传ZIP，最后切换manifest.json，保留仍被客户端引用的历史归档。
+
+检查→下载→校验暂存→确认重启→新进程Vue启动确认构成完整资源链路；首次启动失败或待更新文件损坏回退上个正常版本。下载支持取消，取消后的迟到响应不能激活；已就绪可稍后安装，重复检查不会丢失全量安装器。私钥不进入安装包。
+
+本轮实现与验证范围见 [specs/003-update-channels](specs/003-update-channels/tasks.md)。UOS具体机器的安装、提权、升级体验仍以原001真机验收为准；本地HTTP夹具通过不表示生产更新源已经部署。

@@ -1,4 +1,4 @@
-const INVOKE = ['desktop-bootstrap','getStore','getAllStore','get-system-summary','settings:snapshot','get-resource-version','renderer-ready','IsUseSysTitle','windows-mini','window-max','window-close','window-hide','window-refresh','files-download','start-download','check-update','start-update','cancel-update','confirm-update','hot-update','start-hot-update','confirm-hot-update','get-app-path','get-system-info','get-install-version','get-version','open-messagebox','open-errorbox','open-directory','open-win','get-log-path','open-log-folder','get-log-files','file:select','file:readChunk']
+const INVOKE = ['get-update-status','cancel-hot-update','desktop-bootstrap','getStore','getAllStore','get-system-summary','settings:snapshot','get-resource-version','renderer-ready','IsUseSysTitle','windows-mini','window-max','window-close','window-hide','window-refresh','files-download','start-download','check-update','start-update','cancel-update','confirm-update','hot-update','start-hot-update','confirm-hot-update','get-app-path','get-system-info','get-install-version','get-version','open-messagebox','open-errorbox','open-directory','open-win','get-log-path','open-log-folder','get-log-files','file:select','file:readChunk']
 const SEND = ['setStore','deleteOne','deleteAll','show-context-menu','sendRefresh','siblingConnect']
 const SYNC = ['getStore','getAllStore','get-version','get-system-summary']
 const EVENTS = ['settings-changed','closeApp','receiveRefresh','siblingConnect','send-data','w-max','update-msg','hot-update-status','deep-link-params','download-done','download-error','download-paused','download-progress']
@@ -181,8 +181,8 @@ function createClient(bridge){
       system:{info:method('get-system-info'),summary:method('get-system-summary')},
       window:{open:method('open-win'),minimize:method('windows-mini'),maximize:method('window-max'),close:method('window-close'),hide:method('window-hide'),reload:method('window-refresh'),usesSystemTitle:method('IsUseSysTitle'),refreshSiblings:method('sendRefresh'),messageSiblings:method('siblingConnect'),contextMenu:method('show-context-menu')},
       settings:{get:method('getStore'),all:method('getAllStore'),set:method('setStore'),delete:method('deleteOne'),clear:method('deleteAll')},
-      update:{check:method('check-update'),download:method('start-update'),cancel:method('cancel-update'),install:method('confirm-update')},
-      resources:{check:method('hot-update'),download:method('start-hot-update'),install:method('confirm-hot-update')},
+      update:{status:method('get-update-status'),check:method('check-update'),download:method('start-update'),cancel:method('cancel-update'),install:method('confirm-update')},
+      resources:{cancel:method('cancel-hot-update'),check:method('hot-update'),download:method('start-hot-update'),install:method('confirm-hot-update')},
       download:{start:method('files-download'),simple:method('start-download')},
       files:{select:method('file:select'),readChunk:method('file:readChunk'),directory:method('open-directory')},
       dialog:{message:method('open-messagebox'),error:method('open-errorbox')},

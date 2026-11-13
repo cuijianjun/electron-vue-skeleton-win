@@ -55,3 +55,9 @@ test('installer permission failure is visible and never reported as completed',a
  assert.equal(f.controller.state,'failed')
  assert.match(f.messages.at(-1).msg,/permission denied/)
 })
+test('rechecking a downloaded full update preserves its verified installer',async()=>{
+ const f=fixture();await f.controller.check(f.window,'https://updates.example.invalid');await f.controller.download()
+ const result=await f.controller.check(f.window,'https://updates.example.invalid')
+ assert.equal(result.downloaded,true);assert.equal(f.checks,1);assert.equal(f.controller.state,'downloaded')
+ assert.equal(f.controller.install().ok,true);assert.equal(f.installs,1)
+})

@@ -31,3 +31,18 @@ test('an older asynchronous check cannot overwrite the latest candidate',async()
   assert.equal(resources.resourceInfo(f.options).pendingVersion,'1.0.2')
  }finally{f.close()}
 })
+test('resource installation requires a verified stage and cancellation cannot stage a late response',async()=>{
+ const f=fixture();try{
+  const good=f.make();let resolve,restarts=0
+  const controller=new ResourceUpdateController({options:f.options,readManifest:async()=>({manifest:good.manifest,archiveURL:'http://localhost/a.zip'}),readArchive:()=>new Promise(r=>{resolve=r}),restart:()=>{restarts++}})
+  assert.equal(controller.install().ok,false)
+  await controller.check(window);const pending=controller.download(window)
+  assert.equal(controller.cancel(window).ok,true)
+  assert.equal((await controller.check(window)).status,'busy')
+  resolve(good.archive);assert.equal((await pending).status,'cancelled')
+  assert.equal(resources.resourceInfo(f.options).pendingVersion,null)
+  controller.readArchive=async()=>good.archive
+  await controller.check(window);await controller.download(window)
+  assert.equal(controller.install().ok,true);assert.equal(restarts,1)
+ }finally{f.close()}
+})

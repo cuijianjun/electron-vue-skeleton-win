@@ -65,6 +65,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "config/updates.json",
+        "to": "updates.json"
       }
     ],
     "win": {

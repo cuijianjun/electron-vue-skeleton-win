@@ -14,11 +14,15 @@ test('update route shows full/resource choices and routes confirmation to the ma
     localStorage.removeItem('tomorrowTipStartTime')
     const vue=document.querySelector('#app').__vue_app__,callbacks={},calls=[]
     window.__dialogCalls=calls
+    let downloaded=false
     const invoke=async channel=>{
       calls.push(channel)
       if(channel==='get-resource-version')return '1.0.0'
-      if(channel==='check-update'){callbacks['update-msg']?.({state:full?1:2,msg:{version:'1.0.1'}});return {ok:true,available:full,info:{version:'1.0.1'}}}
+      if(channel==='check-update'){callbacks['update-msg']?.({state:full?1:2,msg:{version:'1.0.1'}});return {ok:true,available:full,downloaded:full&&downloaded,info:{version:'1.0.1'}}}
+      if(channel==='hot-update'&&downloaded){callbacks['hot-update-status']?.({status:'finished'});return {status:'finished'}}
       if(channel==='hot-update'){callbacks['hot-update-status']?.({status:'update-available',version:'1.0.1'});return {status:'update-available',version:'1.0.1'}}
+      if(channel==='start-update'){downloaded=true;callbacks['update-msg']?.({state:4})}
+      if(channel==='start-hot-update'){downloaded=true;callbacks['hot-update-status']?.({status:'finished'})}
       return {ok:true}
     }
     vue.config.globalProperties.$desktop={
@@ -37,6 +41,12 @@ test('update route shows full/resource choices and routes confirmation to the ma
    assert.ok(calls.includes(full?'start-update':'start-hot-update'),JSON.stringify(calls))
    assert.ok(!calls.includes(full?'start-hot-update':'start-update'))
    if(full)assert.ok(!calls.includes('hot-update'),'full update must take priority')
+   await page.getByRole('button',{name:full?'立即安装':'重启生效',exact:true}).waitFor()
+   await page.getByRole('button',{name:full?'立即安装':'重启生效',exact:true}).click()
+   const installed=await page.evaluate(()=>window.__dialogCalls)
+   assert.equal(installed.filter(c=>c===(full?'confirm-update':'confirm-hot-update')).length,1)
+   assert.equal(installed.filter(c=>c===(full?'start-update':'start-hot-update')).length,1,'Installing must not download the artifact again')
+   await page.evaluate(()=>document.querySelector('#app').__vue_app__.config.globalProperties.$router.currentRoute.value.matched.at(-1).instances.default.getUpdateInfo())
    await page.getByRole('button',{name:'明天提醒我'}).click()
    await page.locator('.loopDialog').waitFor({state:'hidden'})
    assert.ok(await page.evaluate(()=>Number(localStorage.getItem('tomorrowTipStartTime')))>0)

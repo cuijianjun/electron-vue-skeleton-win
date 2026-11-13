@@ -10,7 +10,8 @@ import download from './download'
 import Update from './checkupdate'
 import { loadingOtherWindow } from './windowManager'
 import { openDevTools } from '../config/const'
-import { updater } from './HotUpdater'
+import { updater,downloadResources,cancelResources,installResources,getUpdateInfo } from './HotUpdater'
+import settings from './updateConfig.cjs'
 import fs from 'fs'
 import { getLogPath } from '../config/logger'
 import { getSystemInfo, getSystemSummary } from '../utils/systemDetect.js'
@@ -28,6 +29,14 @@ export default {
 	Mainfunc(IsUseSysTitle) {
 		// 全量更新实例
 		const allUpdater = new Update()
+        const resourceLocked=()=>getUpdateInfo().busy||Boolean(resources.resourceInfo(resourceContext()).pendingVersion)
+        const fullLocked=()=>allUpdater.controller.busy()||allUpdater.controller.state==='downloaded'
+        const withFull=action=>resourceLocked()?{ok:false,error:'Finish or cancel the resource update first'}:action()
+        const withResource=action=>fullLocked()?{status:'busy',ok:false,message:'Finish or cancel the full update first',error:'Finish or cancel the full update first'}:action()
+        ipcMain.handle('get-update-status',()=>{
+            const config=settings.updateConfig(app),resource=resources.resourceInfo(resourceContext())
+            return {full:{state:allUpdater.controller.state,error:allUpdater.controller.lastError},resource:{...resource,...getUpdateInfo()},configured:{full:Boolean(config.fullURL),resource:Boolean(config.resourceURL&&config.publicKey)},autoCheck:config.autoCheck,intervalHours:config.intervalHours}
+        })
         ipcMain.handle('get-resource-version', () => resources.resourceInfo(resourceContext()).runningVersion)
         ipcMain.handle('renderer-ready', event => { const owner=BrowserWindow.fromWebContents(event.sender); if(!owner || owner.getParentWindow())return false; resources.confirm(resourceContext()); return true })
 
@@ -79,24 +88,23 @@ export default {
 
 		// ============ 全量更新 ============
 		ipcMain.handle('check-update', (event) => {
-			return allUpdater.checkUpdate(BrowserWindow.fromWebContents(event.sender))
+			return withFull(()=>allUpdater.checkUpdate(BrowserWindow.fromWebContents(event.sender)))
 		})
 		ipcMain.handle('cancel-update', () => allUpdater.cancel())
         ipcMain.handle('start-update', () => {
-			return allUpdater.handleDownload()
+			return withFull(()=>allUpdater.handleDownload())
 		})
 		ipcMain.handle('confirm-update', () => {
-			return allUpdater.quitInstall()
+			return withFull(()=>allUpdater.quitInstall())
 		})
 
 		// ============ 热更新 ============
 		ipcMain.handle('hot-update', (event) => {
-			return updater(BrowserWindow.fromWebContents(event.sender))
+			return withResource(()=>updater(BrowserWindow.fromWebContents(event.sender)))
 		})
-		ipcMain.handle('confirm-hot-update', () => {
-			app.relaunch()
-			app.exit(0)
-		})
+        ipcMain.handle('start-hot-update',event=>withResource(()=>downloadResources(BrowserWindow.fromWebContents(event.sender))))
+        ipcMain.handle('cancel-hot-update',event=>cancelResources(BrowserWindow.fromWebContents(event.sender)))
+        ipcMain.handle('confirm-hot-update',()=>withResource(()=>installResources()))
 
 		// ============ 应用路径 / 系统信息 / 版本 ============
 		ipcMain.handle('get-app-path', () => {

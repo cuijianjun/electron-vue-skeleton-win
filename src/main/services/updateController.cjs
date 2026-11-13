@@ -11,6 +11,7 @@ class UpdateController {
  fail(error){this.lastError=error.message;this.state='failed';this.message(-1,error.message);return {ok:false,error:error.message}}
  busy(){return ['checking','downloading','cancelling','installing'].includes(this.state)}
  async check(window,source){
+   if(this.state==='downloaded'){this.owner=window;return {ok:true,available:true,downloaded:true,info:this.updateInfo||{}}}
    if(this.busy())return {ok:false,error:'Update already running or cancelling'}
    this.owner=window
    const generation=++this.generation
@@ -23,6 +24,7 @@ class UpdateController {
      const result=await this.updater.checkForUpdates()
      if(generation!==this.generation)return {ok:false,error:'Update cancelled'}
      if(!result)throw new Error('Full updates require a packaged application')
+     this.updateInfo=result.updateInfo||{}
      this.state=result.isUpdateAvailable?'available':'idle'
      this.message(result.isUpdateAvailable?1:2,result.updateInfo||'')
      return {ok:true,available:Boolean(result.isUpdateAvailable),info:result.updateInfo||{}}

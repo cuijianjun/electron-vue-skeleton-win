@@ -40,8 +40,8 @@ test('Windows NSIS install, native update transport, A→B persistence and unins
  })
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve))
  await fsp.mkdir(path.join(root,'local-appdata'))
- const env={...process.env,LOCALAPPDATA:path.join(root,'local-appdata'),SKELETON_E2E:'1',SKELETON_USER_DATA:profile,APP_UPDATE_URL:'http://127.0.0.1:'+server.address().port}
- for(const key of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[key]
+ const env={...process.env,LOCALAPPDATA:path.join(root,'local-appdata'),SKELETON_E2E:'1',SKELETON_USER_DATA:profile}
+ for(const key of ['ELECTRON_RUN_AS_NODE','ELECTRON_RENDERER_URL','APP_UPDATE_URL','APP_DOWNLOAD_URL','RESOURCE_UPDATE_URL','RESOURCE_UPDATE_PUBLIC_KEY','RESOURCE_UPDATE_PUBLIC_KEY_FILE'])delete env[key]
  function clean(){return !fs.existsSync(exe)&&remainingKeys().length===0&&shortcuts.every(file=>!fs.existsSync(file))}
  function verifyUninstaller(){const bytes=fs.readFileSync(uninstaller);assert.equal(crc32(bytes.subarray(512,bytes.length-4)),bytes.readUInt32LE(bytes.length-4),'NSIS uninstaller CRC must match; preserve the original matching installer/uninstaller icon')}
  function stopOwnedProcesses(){
@@ -124,9 +124,12 @@ public static class SkeletonNsisUI {
   command(installerA,['/S','/currentuser','/D='+install])
   assert.ok(fs.existsSync(exe))
   verifyUninstaller()
+  const configFile=path.join(install,'resources/updates.json');assert.ok(fs.existsSync(configFile))
+  const updateConfig=JSON.parse(fs.readFileSync(configFile));updateConfig.fullURL='http://127.0.0.1:'+server.address().port;updateConfig.autoCheck=false;fs.writeFileSync(configFile,JSON.stringify(updateConfig))
   const registration=command('reg.exe',['query','HKCU\\Software\\Classes\\myapp\\shell\\Open\\command','/ve'])
   assert.ok(registration.includes('"'+exe+'" "%1"'),registration)
   const page=await open('1.0.0')
+  assert.equal((await page.evaluate(()=>window.electronAPI.calls['get-update-status']())).configured.full,true)
   await page.evaluate(()=>window.electronAPI.writes.setStore('installer-regression',{value:'retained 中文',zero:0,flag:false}))
   assert.equal((await page.evaluate(()=>window.electronAPI.calls['check-update']())).ok,false)
   mode='slow'
@@ -140,6 +143,9 @@ public static class SkeletonNsisUI {
   mode='fast'
   assert.equal((await page.evaluate(()=>window.electronAPI.calls['check-update']())).available,true)
   assert.equal((await page.evaluate(()=>window.electronAPI.calls['start-update']())).ok,true)
+  assert.equal((await page.evaluate(()=>window.electronAPI.calls['check-update']())).downloaded,true)
+  assert.equal((await page.evaluate(()=>window.electronAPI.calls['hot-update']())).status,'busy')
+  assert.equal((await page.evaluate(()=>window.electronAPI.calls['confirm-hot-update']())).ok,false)
   await page.evaluate(()=>{window.__links=[];window.electronAPI.events['deep-link-params'](value=>window.__links.push(value))})
   // Execute the actual registered protocol with the same isolated profile.
   command('cmd.exe',['/d','/c','start','','myapp://openapp?installer=verified'],{env})

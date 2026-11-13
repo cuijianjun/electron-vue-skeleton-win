@@ -27,20 +27,23 @@
       <h2>③ 全量更新（electron-updater）</h2>
       <p class="status">{{ fullUpdateStatus }}</p>
       <progress v-if="fullProgress > 0" :value="fullProgress" max="100"></progress>
-      <button @click="$desktop.update.check()">检查全量更新</button>
-      <button v-if="canDownload" @click="$desktop.update.download()">下载更新</button>
-      <button v-if="canInstall" @click="$desktop.update.install()">退出并安装</button>
-      <p class="tip">通道：check-update → 主进程推 update-msg（state：0 检查中 / 1 有更新 / 2 无更新 / 3 下载中 / 4 完成）</p>
+      <button @click="checkFull">检查全量更新</button>
+      <button v-if="canDownload" @click="downloadFull">下载更新</button>
+      <button v-if="canInstall" @click="installFull">退出并安装</button>
+      <button v-if="fullBusy || canInstall" @click="cancelFull">取消更新</button>
+      <p class="tip">更新完整应用，包含运行时和主进程；下载完成后确认安装。</p>
     </section>
 
     <!-- ④ 热更新（增量资源） -->
     <section class="card">
-      <h2>④ 热更新（增量资源 HotUpdater）</h2>
+      <h2>④ 增量更新（签名差异资源）</h2>
       <p class="status">{{ hotUpdateStatus }}</p>
-      <button @click="$desktop.resources.check()">检查热更新</button>
-      <button v-if="canHotDownload" @click="$desktop.resources.download()">下载热更新包</button>
-      <button v-if="hotDone" @click="$desktop.resources.install()">重启生效</button>
-      <p class="tip">通道：hot-update → 主进程推 hot-update-status（update-available/downloading/moving/finished）</p>
+      <button @click="checkResources">检查热更新</button>
+      <button v-if="canHotDownload" @click="downloadResources">下载热更新包</button>
+      <button v-if="hotDone" @click="installResources">重启生效</button>
+      <progress v-if="hotProgress > 0" :value="hotProgress" max="100"></progress>
+      <button v-if="hotBusy || hotDone" @click="cancelResources">取消更新</button>
+      <p class="tip">只下载有变化的界面文件；版本不匹配时自动下载完整界面包，验证后重启生效。</p>
     </section>
 
     <!-- ⑤ 深链唤起 -->
@@ -89,13 +92,13 @@ export default {
       systemInfo: null,
       // 全量更新
       fullUpdateStatus: '未检查',
-      fullProgress: 0,
+      fullProgress: 0,fullBusy:false,
       canDownload: false,
       canInstall: false,
       // 热更新
       hotUpdateStatus: '未检查',
       canHotDownload: false,
-      hotDone: false,
+      hotDone: false,hotBusy:false,hotProgress:0,
       // 深链
       deepLink: '',
       // iframe
@@ -108,10 +111,35 @@ export default {
   },
   methods: {
     subscribe(channel,callback){return this._desktop.events.on(channel,callback)},
+    async fullAction(action){
+      try{
+        const result=await this.$desktop.update[action]()
+        if(result?.ok===false)this.fullUpdateStatus=result.error
+        if(action!=='install'||result?.ok===false){const s=await this.$desktop.update.status();this.fullBusy=['checking','downloading','cancelling','installing'].includes(s.full.state)}
+        return result
+      }catch(error){this.fullUpdateStatus=error.message;return {ok:false,error:error.message}}
+    },
+    async resourceAction(action){
+      try{
+        const result=await this.$desktop.resources[action]()
+        if(result?.ok===false||result?.status==='failed'||result?.status==='busy')this.hotUpdateStatus=result.error||result.message
+        if(action!=='install'||result?.ok===false){const s=await this.$desktop.update.status();this.hotBusy=s.resource.busy}
+        return result
+      }catch(error){this.hotUpdateStatus=error.message;return {ok:false,error:error.message}}
+    },
+    checkFull(){return this.fullAction('check')},downloadFull(){return this.fullAction('download')},installFull(){return this.fullAction('install')},
+    async cancelFull(){const result=await this.fullAction('cancel');if(result?.ok){this.canDownload=false;this.canInstall=false}},
+    checkResources(){return this.resourceAction('check')},downloadResources(){return this.resourceAction('download')},installResources(){return this.resourceAction('install')},
+    async cancelResources(){const result=await this.resourceAction('cancel');if(result?.ok){this.canHotDownload=false;this.hotDone=false}},
     async getInfo(){
       [this.version,this.systemInfo,this.rendererVersion]=await Promise.all([
         this.$desktop.app.version(),this.$desktop.system.info(),this.$desktop.app.rendererVersion()
       ])
+      const status=await this.$desktop.update.status()
+      this.canInstall=status.full.state==='downloaded';this.canDownload=status.full.state==='available'
+      this.hotDone=Boolean(status.resource.pendingVersion)
+      if(this.canInstall)this.fullUpdateStatus='下载完成，可安装'
+      if(this.hotDone)this.hotUpdateStatus='界面更新已下载，等待重启'
     },
     async setStore(){
       await this.$desktop.settings.set(this.storeKey,this.storeValue)
@@ -138,6 +166,7 @@ export default {
     // ============ ③ 全量更新事件（主进程 → 渲染进程） ============
     this.subscribe('update-msg', info => {
       // info = { state, msg }，state 见 checkupdate.js 状态机
+      this.fullBusy=[0,3].includes(info.state)
       switch (info.state) {
         case 0:
           this.canDownload = false
@@ -159,6 +188,7 @@ export default {
           break
         case 4:
           this.fullUpdateStatus = '下载完成，可安装'
+          this.canDownload = false
           this.canInstall = true
           break
         case -1:
@@ -171,6 +201,7 @@ export default {
 
     // ============ ④ 热更新事件 ============
     this.subscribe('hot-update-status', info => {
+      this.hotBusy=['downloading','moving'].includes(info.status)
       switch (info.status) {
         case 'update-not-available':
           this.hotUpdateStatus = '界面已是最新版本'
@@ -182,7 +213,8 @@ export default {
           this.canHotDownload = true
           break
         case 'downloading':
-          this.hotUpdateStatus = '正在下载...'
+          this.hotProgress=Number(info.percent||0)
+          this.hotUpdateStatus = `正在下载 ${this.hotProgress}%`
           break
         case 'moving':
           this.hotUpdateStatus = '正在解压替换...'
@@ -192,6 +224,8 @@ export default {
           this.canHotDownload = false
           this.hotDone = true
           break
+        case 'cancelled':
+          this.hotDone=false;this.canHotDownload=false;this.hotUpdateStatus='已取消，可重新检查';break
         case 'failed':
           this.hotUpdateStatus = `失败：${info.message}`
           this.canHotDownload = false

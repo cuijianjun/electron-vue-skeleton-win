@@ -74,3 +74,13 @@ test('same and older signed resource versions cannot replace a confirmed rendere
   assert.throws(()=>stage(old.manifest,old.archive,f.options),/newer/)
  }finally{f.close()}
 })
+test('ZIP entries cannot lie about zero decoded size even with a trusted signature',()=>{
+ const f=fixture();try{
+  const zip=new AdmZip();zip.addFile('index.html',Buffer.alloc(1024*1024,65));const archive=zip.toBuffer()
+  // Zero the decoded sizes in local and central records, retaining valid compressed bytes and CRC.
+  archive.writeUInt32LE(0,22)
+  const central=archive.indexOf(Buffer.from([0x50,0x4b,0x01,0x02]));archive.writeUInt32LE(0,central+24)
+  const signed=f.sign(archive)
+  assert.throws(()=>stage(signed.manifest,archive,f.options),/size|large|length|output/i)
+ }finally{f.close()}
+})

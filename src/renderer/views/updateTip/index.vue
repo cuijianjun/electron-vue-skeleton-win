@@ -1,22 +1,4 @@
-<!--
-  ============================================================
-  更新弹窗组件 (views/updateTip/index.vue)
-  ============================================================
-  这是「更新包逻辑」机制的前端展示层，配合主进程的
-  checkupdate.js（全量更新）和 HotUpdater.js（热更新）使用。
-
-  说明：本骨架未内置 Element-UI，故用原生 HTML/CSS 实现弹窗，
-        去掉真实项目里的 el-progress / el-button / $confirm 等依赖。
-
-  完整链路：
-    1. 挂载时读取 update-config 服务器上的 message.json，
-       判断是全量更新还是增量更新
-    2. 全量更新：check-update → 监听 update-msg 事件（state 1/3/4）
-    3. 增量更新：hot-update → 监听 hot-update-status 事件
-       （update-available/downloading/moving/finished）
-    4. 生产环境每 12 小时轮询一次
-  ============================================================
--->
+<!-- Full installer and signed renderer updates share a verified download/install lifecycle. -->
 <template>
   <div>
     <div class="loopDialog" v-if="tomorrowTipVis && dialogVisible">
@@ -38,7 +20,8 @@
         <button class="btn primary" @click="handleConfirm" :disabled="btnLoading">
           {{ btnInfo }}
         </button>
-        <button v-if="!forceUpdate" class="btn" @click="tomorrowTip">明天提醒我</button>
+        <button v-if="btnLoading" class="btn" @click="cancelDownload">取消下载</button>
+        <button v-if="!forceUpdate && !btnLoading" class="btn" @click="tomorrowTip">明天提醒我</button>
       </div>
     </div>
     <div class="boxshadow" v-if="tomorrowTipVis && dialogVisible"></div>
@@ -51,19 +34,25 @@ const version=__APP_VERSION__
 export default {
   name:'UpdateTip',
   data(){return {tomorrowTipVis:false,dialogVisible:false,btnLoading:false,percentage:0,updateInfo:{},progressStatus:null,version,forceUpdate:false,fullUpdate:false,updateContent:'',timer:null,checking:false}},
-  computed:{btnInfo(){return this.btnLoading?'下载中':this.progressStatus==='exception'?'重新检查':'立即下载'}},
+  computed:{btnInfo(){return this.btnLoading?'下载中':this.progressStatus==='exception'?'重新检查':this.progressStatus==='success'?(this.fullUpdate?'立即安装':'重启生效'):'立即下载'}},
   mounted(){
     this._desktop=this.$desktop.scope()
     this.refreshReminder()
     this.subscribe('update-msg',info=>this.onFullUpdate(info))
     this.subscribe('hot-update-status',info=>this.onResourceUpdate(info))
-    if(import.meta.env.RENDERER_VITE_UPDATE_ENABLED==='true'){
-      this.getUpdateInfo()
-      this.timer=setInterval(()=>this.getUpdateInfo(),12*3600*1000)
-    }
+    this.restoreStatus()
   },
   beforeUnmount(){this._desktop?.dispose();clearInterval(this.timer)},
   methods:{
+    async restoreStatus(){
+      const status=await this.$desktop.update.status?.()
+      if(!status)return
+      if(status.full.state==='downloaded'){this.fullUpdate=true;this.progressStatus='success';this.updateContent='应用更新已下载，等待安装';this.dialogVisible=true;return}
+      if(status.resource.pendingVersion){this.fullUpdate=false;this.progressStatus='success';this.updateContent='界面更新已下载，等待重启';this.dialogVisible=true;return}
+      if((status.autoCheck||import.meta.env.RENDERER_VITE_UPDATE_ENABLED==='true')&&(status.configured.full||status.configured.resource)){
+        this.getUpdateInfo();this.timer=setInterval(()=>this.getUpdateInfo(),status.intervalHours*3600*1000)
+      }
+    },
     subscribe(channel,callback){return this._desktop.events.on(channel,callback)},
     refreshReminder(){
       const now=new Date(),start=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()
@@ -76,7 +65,7 @@ export default {
       this.refreshReminder()
       try{
         const full=await this.$desktop.update.check()
-        if(full?.ok&&full.available){this.showFull(full.info||{});return}
+        if(full?.ok&&full.available){this.showFull(full.info||{});if(full.downloaded){this.progressStatus='success';this.updateContent='应用更新已下载，等待安装'};return}
         this.fullUpdate=false;this.forceUpdate=false
         this.version=await this.$desktop.app.rendererVersion()
         const resource=await this.$desktop.resources.check()
@@ -111,22 +100,31 @@ export default {
     onResourceUpdate(info){
       if(!info||(this.fullUpdate&&this.dialogVisible))return
       if(info.status==='update-available')this.showResource(info)
-      else if(info.status==='downloading'||info.status==='moving')this.btnLoading=true
+      else if(info.status==='downloading'||info.status==='moving'){this.btnLoading=true;this.percentage=Number(info.percent||0)}
+      else if(info.status==='cancelled'){this.btnLoading=false;this.showFailure('已取消，可重新检查更新')}
       else if(info.status==='finished'){this.fullUpdate=false;this.finish('界面更新已下载，是否立即重启生效?')}
       else if(info.status==='update-not-available')this.dialogVisible=false
       else if(info.status==='failed'&&!this.checking)this.showFailure(info.message)
     },
-    finish(message){
-      this.progressStatus='success';this.btnLoading=false
-      if(window.confirm(message)){
-        (this.fullUpdate?this.$desktop.update.install():this.$desktop.resources.install()).then(result=>{
-          if(result?.ok===false)this.showFailure(result.error)
-        }).catch(error=>this.showFailure(error.message))
-      }
-      this.dialogVisible=false
+    async finish(message){
+      this.progressStatus='success';this.btnLoading=false;this.updateContent=message;this.dialogVisible=true
+      if(window.confirm(message))await this.installUpdate()
+    },
+    async installUpdate(){
+      try{
+        const result=await (this.fullUpdate?this.$desktop.update.install():this.$desktop.resources.install())
+        if(result?.ok===false){this.showFailure(result.error||result.message);return}
+        this.dialogVisible=false
+      }catch(error){this.showFailure(error.message)}
+    },
+    async cancelDownload(){
+      const result=await (this.fullUpdate?this.$desktop.update.cancel():this.$desktop.resources.cancel())
+      if(result?.ok===false)this.showFailure(result.error)
+      else this.showFailure('已取消，可重新检查更新')
     },
     async handleConfirm(){
       if(this.checking)return
+      if(this.progressStatus==='success'){await this.installUpdate();return}
       if(this.progressStatus==='exception'){await this.getUpdateInfo();return}
       this.btnLoading=true
       try{
